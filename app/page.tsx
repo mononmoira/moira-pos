@@ -2703,6 +2703,59 @@ export default function Home() {
       スタッフ・給与 {workingCount}名
     </button>
 
+<button
+  type="button"
+  onClick={createBackup}
+  className="min-h-12 rounded-xl bg-cyan-700 px-4 py-2 font-bold"
+>
+  バックアップ
+</button>
+
+<label className="flex min-h-12 cursor-pointer items-center justify-center rounded-xl bg-indigo-700 px-4 py-2 font-bold">
+  復元
+  <input
+    type="file"
+    accept=".json,application/json"
+    className="hidden"
+    onChange={async (event) => {
+      const file = event.target.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      const confirmed = window.confirm(
+        "現在のデータをバックアップ内容で置き換えますか？",
+      );
+
+      if (!confirmed) {
+        event.target.value = "";
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+
+        restoreBackup(parsed);
+
+        alert(
+          "バックアップを復元しました。保存が完了するまで数秒お待ちください。",
+        );
+      } catch (error) {
+        console.error(error);
+        alert(
+          error instanceof Error
+            ? error.message
+            : "バックアップの復元に失敗しました。",
+        );
+      } finally {
+        event.target.value = "";
+      }
+    }}
+  />
+</label>
+
     <button
       type="button"
       onClick={resetCurrentData}

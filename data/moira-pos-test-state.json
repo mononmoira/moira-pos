@@ -1,0 +1,195 @@
+{
+  "tickets": [
+    {
+      "id": "db9c2ca8-c42a4ed2-c57b0484-b2aedaab",
+      "seatId": 1,
+      "guests": 1,
+      "courseId": "normal",
+      "courseName": "通常セット",
+      "startedAt": "2026-07-17T08:50:00.000Z",
+      "endAt": "2026-07-17T09:50:00.000Z",
+      "courseTotal": 3000,
+      "orders": [],
+      "payments": [],
+      "reservationEntries": [],
+      "total": 3000,
+      "balance": 3000
+    }
+  ],
+  "closedTickets": [
+    {
+      "id": "75fe5135-7dda-4848-9695-b286a59acefb",
+      "seatId": 1,
+      "guests": 1,
+      "courseId": "normal",
+      "courseName": "通常セット",
+      "startedAt": "2026-07-17T02:00:00.000Z",
+      "endAt": "2026-07-17T04:00:00.000Z",
+      "courseTotal": 3000,
+      "orders": [
+        {
+          "id": "98a7ca51-38aa-45bd-a6c3-d04e12e25df0",
+          "productId": "extension-60-3000",
+          "name": "60分延長",
+          "price": 3000,
+          "quantity": 1
+        }
+      ],
+      "payments": [
+        {
+          "id": "17aca90e-0eed-4b22-9e37-0988a8111fc5",
+          "method": "現金",
+          "amount": 6000,
+          "appliedAmount": 6000,
+          "surchargeAmount": 0,
+          "paidAt": "2026-07-17T05:41:17.785Z"
+        }
+      ],
+      "reservationEntries": [],
+      "total": 6000,
+      "balance": 0,
+      "closedAt": "2026-07-17T05:41:23.425Z"
+    }
+  ],
+  "businessReports": [],
+  "staff": [
+    {
+      "id": "masaki",
+      "name": "まさき",
+      "role": "ボーイ",
+      "hourlyWage": 1900,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "yuu",
+      "name": "ゆう",
+      "role": "キャスト",
+      "hourlyWage": 2600,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "meira",
+      "name": "めいら",
+      "role": "キャスト",
+      "hourlyWage": 2500,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "fumika",
+      "name": "ふみか",
+      "role": "キャスト",
+      "hourlyWage": 2400,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "nanami",
+      "name": "ななみ",
+      "role": "キャスト",
+      "hourlyWage": 2400,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "fuuka",
+      "name": "ふうか",
+      "role": "キャスト",
+      "hourlyWage": 2100,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "airi",
+      "name": "あいり",
+      "role": "キャスト",
+      "hourlyWage": 1900,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "soushi",
+      "name": "そうし",
+      "role": "ボーイ",
+      "hourlyWage": 1400,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "momo",
+      "name": "もも",
+      "role": "キャスト",
+      "hourlyWage": 1800,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "panchi",
+      "name": "ぱんち",
+      "role": "ボーイ",
+      "hourlyWage": 1400,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    },
+    {
+      "id": "takumi",
+      "name": "たくみ",
+      "role": "ボーイ",
+      "hourlyWage": 1400,
+      "paymentCycle": "当日日払い",
+      "clockIn": null,
+      "clockOut": null
+    }
+  ],
+  "payrollAdjustments": [],
+  "payrollPayments": [],
+  "customers": [],
+  "appUsers": [
+    {
+      "id": "owner",
+      "name": "ママ",
+      "role": "ママ",
+      "pin": "0000",
+      "enabled": false
+    }
+  ],
+  "auditLogs": [
+    {
+      "id": "7f0290ca-2150-40ad-ad5e-1c4c17043abc",
+      "userId": "owner",
+      "userName": "ママ",
+      "userRole": "ママ",
+      "action": "更新",
+      "target": "ユーザー",
+      "detail": "ママ（ママ）",
+      "createdAt": "2026-07-17T01:53:32.781Z"
+    },
+    {
+      "id": "7adb2d6a-555f-45b9-9466-505d54a4a88b",
+      "userId": "owner",
+      "userName": "ママ",
+      "userRole": "ママ",
+      "action": "ログイン",
+      "target": "ユーザー",
+      "detail": "ママがログイン",
+      "createdAt": "2026-07-17T01:53:25.921Z"
+    }
+  ],
+  "calendarReservations": [],
+  "currentUserId": "owner",
+  "receivables": [],
+  "businessSession": null,
+  "updatedAt": "2026-07-17T09:18:04.446Z"
+}

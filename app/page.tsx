@@ -14,9 +14,7 @@ import OrderModal, {
   type Product,
 } from "./components/OrderModal";
 
-import PaymentModal, {
-  type PaymentMethod,
-} from "./components/PaymentModal";
+import PaymentModal from "./components/PaymentModal";
 
 import StaffModal, {
   type PaymentCycle,
@@ -62,6 +60,12 @@ export type OrderItem = {
   eventCups?: Record<string, number>;
   representativeStaffId?: string;
 };
+
+type PaymentMethod =
+  | "現金"
+  | "Squareカード"
+  | "QR"
+  | "売掛";
 
 type Payment = {
   id: string;
@@ -433,12 +437,15 @@ function createBusinessReport(
       businessDate,
   );
 
-  const paymentTotals = {
-    現金: 0,
-    Squareカード: 0,
-    QR: 0,
-    売掛: 0,
-  };
+  const paymentTotals: Record<
+  PaymentMethod,
+  number
+> = {
+  現金: 0,
+  Squareカード: 0,
+  QR: 0,
+  売掛: 0,
+};
 
   const categoryTotals = {
     セット: 0,
@@ -552,7 +559,9 @@ export default function Home() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [calendarReservations, setCalendarReservations] =
     useState<CalendarReservation[]>([]);
-  const [currentUserId, setCurrentUserId] = useState("owner");
+  const [paymentMode, setPaymentMode] =
+  useState<"prepaid" | "checkout">("checkout");
+    const [currentUserId, setCurrentUserId] = useState("owner");
   const [receivables, setReceivables] =
     useState<Receivable[]>([]);
   const [payrollAdjustments, setPayrollAdjustments] =
@@ -2538,12 +2547,15 @@ function registerAdjustment(
       単品: 0,
     };
 
-    const paymentTotals = {
-      現金: 0,
-      Squareカード: 0,
-      QR: 0,
-      売掛: 0,
-    };
+    const paymentTotals: Record<
+  PaymentMethod,
+  number
+> = {
+  現金: 0,
+  Squareカード: 0,
+  QR: 0,
+  売掛: 0,
+};
 
     const staffRows = staff.map((person) => ({
       staffId: person.id,
@@ -3019,18 +3031,16 @@ function registerAdjustment(
               </div>
             )}
 
-            {selectedTicket && (
-              <div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-2xl font-black">
-                      {seats.find((seat) => seat.id === selectedTicket.seatId)?.name}
+                      {seats.find((seat) => seat.id === selectedTicket?.seatId)?.name}
                     </h2>
                     <p className="mt-1 text-slate-300">
-                      {selectedTicket.guests}名・{selectedTicket.courseName}
+                      {selectedTicket?.guests}名・{selectedTicket?.courseName}
                     </p>
 
-                    {selectedTicket.customerName && (
+                    {selectedTicket?.customerName && (
                       <p className="mt-1 font-bold text-violet-300">
                         お客様：{selectedTicket.customerName}
                       </p>
@@ -3045,91 +3055,79 @@ function registerAdjustment(
                     閉じる
                   </button>
                 </div>
+ {selectedTicket && (
+  <div>
+    <div className="mt-3 grid grid-cols-3 gap-2">
+      <button
+        type="button"
+        onClick={() => setShowOrder(true)}
+        className="min-h-14 rounded-xl bg-purple-600 p-3 text-lg font-bold"
+      >
+        ＋ 注文追加
+      </button>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowOrder(true)}
-                    className="min-h-14 rounded-xl bg-purple-600 p-3 text-lg font-bold"
-                  >
-                    ＋ 注文追加
-                  </button>
+      <button
+        type="button"
+        onClick={() => {
+          setPaymentMode("prepaid");
+          setShowPayment(true);
+        }}
+        className="min-h-14 rounded-xl bg-blue-600 p-3 text-lg font-bold"
+      >
+        先払い
+      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowPayment(true)}
-                    className="min-h-14 rounded-xl bg-pink-600 p-3 text-lg font-bold"
-                  >
-                    先払い・会計
-                  </button>
-                </div>
+      <button
+        type="button"
+        onClick={() => {
+          setPaymentMode("checkout");
+          setShowPayment(true);
+        }}
+        className="min-h-14 rounded-xl bg-pink-600 p-3 text-lg font-bold"
+      >
+        会計
+      </button>
+    </div>
 
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowReservation(true)}
-                    className="min-h-12 rounded-xl bg-cyan-700 p-3 text-lg font-bold"
-                  >
-                    予約設定
-                    {selectedTicket.reservationEntries?.length
-                      ? `（${selectedTicket.reservationEntries.reduce(
-                          (total, entry) =>
-                            total + entry.quantity,
-                          0,
-                        )}人）`
-                      : ""}
-                  </button>
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        onClick={() => setShowReservation(true)}
+        className="min-h-12 rounded-xl bg-cyan-700 p-3 text-lg font-bold"
+      >
+        予約設定
+        {selectedTicket.reservationEntries?.length
+          ? `（${selectedTicket.reservationEntries.reduce(
+              (total, entry) => total + entry.quantity,
+              0,
+            )}人）`
+          : ""}
+      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowSeatMove(true)}
-                    className="min-h-12 rounded-xl bg-teal-700 p-3 text-lg font-bold"
-                  >
-                    席移動
-                  </button>
-                </div>
+      <button
+        type="button"
+        onClick={() => setShowSeatMove(true)}
+        className="min-h-12 rounded-xl bg-teal-700 p-3 text-lg font-bold"
+      >
+        席移動
+      </button>
+    </div>
 
-                <div className="hidden">
-                  <button
-                    type="button"
-                    onClick={() => setShowReservation(true)}
-                    className="mt-2 min-h-12 w-full rounded-xl bg-cyan-700 p-3 text-lg font-bold"
-                  >
-                  予約設定
-                  {selectedTicket.reservationEntries?.length
-                    ? `（${selectedTicket.reservationEntries.reduce(
-                        (total, entry) => total + entry.quantity,
-                        0,
-                      )}人）`
-                    : ""}
-                </button>
-                </div>
+    <button
+      type="button"
+      onClick={() => setShowExtension(true)}
+      className="mt-2 min-h-12 w-full rounded-xl bg-orange-700 p-3 text-lg font-bold"
+    >
+      延長
+    </button>
 
-                <button
-  type="button"
-  onClick={() => setShowExtension(true)}
-  className="mt-2 min-h-12 w-full rounded-xl bg-orange-700 p-3 text-lg font-bold"
->
-  延長
-</button>
-
-<button
-  type="button"
-  onClick={() => setShowTicketEdit(true)}
-  className="mt-2 min-h-12 w-full rounded-xl bg-blue-700 p-3 text-lg font-bold"
->
-  ⚙️ 伝票修正
-</button>
-
-<button
-  type="button"
-  onClick={() =>
-    setShowAdjustment(true)
-  }
-  className="min-h-14 rounded-xl bg-pink-700 p-3 font-bold"
->
-  サービス・割引
-</button>
+    <button
+      type="button"
+      onClick={() => setShowTicketEdit(true)}
+      className="mt-2 min-h-12 w-full rounded-xl bg-blue-700 p-3 text-lg font-bold"
+    >
+      ⚙️ 伝票修正
+    </button>
 
 <div className="mt-3 grid grid-cols-3 gap-2">
                   <div className="rounded-xl bg-slate-800 p-3">
@@ -3544,15 +3542,16 @@ function registerAdjustment(
             setShowStaff(false);
           }}
         />
-      )}
+       )}
 
       {showPayment && selectedTicket && (
-        <PaymentModal
-          balance={calculateBalance(selectedTicket)}
-          customerName={selectedTicket.customerName}
-          onRegisterPayment={registerPayment}
-          onClose={() => setShowPayment(false)}
-        />
+       <PaymentModal
+  balance={calculateBalance(selectedTicket)}
+  customerName={selectedTicket.customerName}
+  paymentMode={paymentMode}
+  onRegisterPayment={registerPayment}
+  onClose={() => setShowPayment(false)}
+/>
       )}
 
       {showSalesAnalysis && (

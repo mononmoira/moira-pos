@@ -11,6 +11,7 @@ export type PaymentMethod =
 type Props = {
   balance: number;
   customerName?: string;
+  paymentMode: "prepaid" | "checkout";
   onRegisterPayment: (
     method: PaymentMethod,
     amount: number,
@@ -25,6 +26,7 @@ function roundUpToThousand(value: number) {
 export default function PaymentModal({
   balance,
   customerName,
+  paymentMode,
   onRegisterPayment,
   onClose,
 }: Props) {
@@ -112,9 +114,8 @@ export default function PaymentModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
       <div className="max-h-[95vh] w-full max-w-lg overflow-y-auto rounded-3xl bg-slate-900 p-6 text-white">
         <h2 className="text-3xl font-bold">
-          先払い・会計
-        </h2>
-
+  {paymentMode === "prepaid" ? "先払い" : "会計"}
+</h2>
         <div className="mt-5 rounded-xl bg-slate-800 p-4">
           未会計：{balance.toLocaleString()}円
         </div>
@@ -287,15 +288,17 @@ export default function PaymentModal({
           </button>
 
           <button
-            type="button"
-            disabled={paymentDisabled}
-            onClick={() =>
-              onRegisterPayment(method, amount)
-            }
-            className="min-h-14 rounded-xl bg-pink-600 font-bold disabled:bg-slate-600 disabled:text-slate-400"
-          >
-            支払い登録
-          </button>
+  type="button"
+  disabled={paymentDisabled}
+  onClick={() =>
+    onRegisterPayment(method, amount)
+  }
+  className="min-h-14 rounded-xl bg-pink-600 font-bold disabled:bg-slate-600 disabled:text-slate-400"
+>
+  {paymentMode === "prepaid"
+    ? "先払いを登録"
+    : "会計する"}
+</button>
         </div>
       </div>
     </div>

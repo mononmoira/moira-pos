@@ -1,5 +1,6 @@
 "use client";
 
+import type { PaymentMethod } from "./PaymentModal";
 import { useMemo, useState } from "react";
 import type {
   BusinessSession,
@@ -236,19 +237,34 @@ export default function DailyReportModal({
       ? Math.floor(totalSales / guests)
       : 0;
 
-  const paymentTotals = {
+  const paymentTotals: Record<PaymentMethod, number> = {
     現金: 0,
     Squareカード: 0,
     QR: 0,
     売掛: 0,
   };
 
-  tickets.forEach((ticket) =>
-    ticket.payments.forEach((payment) => {
-      paymentTotals[payment.method] +=
-        payment.amount;
-    }),
-  );
+tickets.forEach((ticket) => {
+  ticket.payments.forEach((payment) => {
+    switch (payment.method) {
+      case "現金":
+        paymentTotals.現金 += payment.amount;
+        break;
+
+      case "Squareカード":
+        paymentTotals.Squareカード += payment.amount;
+        break;
+
+      case "QR":
+        paymentTotals.QR += payment.amount;
+        break;
+
+      case "売掛":
+        paymentTotals.売掛 += payment.amount;
+        break;
+    }
+  });
+});
 
   const productRows = useMemo(() => {
     const map = new Map<

@@ -1,3 +1,4 @@
+import ServiceWorkerRegister from "./components/ServiceWorkerRegister";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
@@ -42,7 +43,10 @@ export default function RootLayout({
       lang="ja"
       className="h-full antialiased"
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+  <ServiceWorkerRegister />
+  {children}
+</body>
     </html>
   );
 }

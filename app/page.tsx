@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 
 import { createId } from "./lib/createId";
 
@@ -22,6 +23,9 @@ import StaffModal, {
   type Staff,
   type StaffRole,
 } from "./components/StaffModal";
+
+import TicketEditModal from "./components/TicketEditModal";
+import { AdjustmentModal } from "./components/AdjustmentModal";
 
 import StaffSelectModal from "./components/StaffSelectModal";
 import EventStaffModal from "./components/EventStaffModal";
@@ -218,6 +222,7 @@ export type BusinessSession = {
 
 export type Ticket = TableTicket & {
   courseId: string;
+  extensionCourseId?: string;
   courseTotal: number;
   orders: OrderItem[];
   payments: Payment[];
@@ -588,6 +593,10 @@ export default function Home() {
   const [showReservationCalendar, setShowReservationCalendar] =
     useState(false);
   const [showExtension, setShowExtension] = useState(false);
+  const [showTicketEdit, setShowTicketEdit] =
+  useState(false);
+  const [showAdjustment, setShowAdjustment] =
+  useState(false);
   const [showSeatMove, setShowSeatMove] = useState(false);
   const [showReceivables, setShowReceivables] =
     useState(false);
@@ -644,22 +653,35 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+  if (typeof window === "undefined") return;
+  if (!("serviceWorker" in navigator)) return;
 
-    const registerServiceWorker = async () => {
-      if (!("serviceWorker" in navigator)) {
+  async function setupServiceWorker() {
+    try {
+      if (process.env.NODE_ENV === "development") {
+        const registrations =
+          await navigator.serviceWorker.getRegistrations();
+
+        await Promise.all(
+          registrations.map((registration) =>
+            registration.unregister(),
+          ),
+        );
+
         return;
       }
 
-      try {
-        await navigator.serviceWorker.register("/sw.js");
-      } catch (error) {
-        console.warn("Service Worker registration failed", error);
-      }
-    };
+      await navigator.serviceWorker.register("/sw.js");
+    } catch (error) {
+      console.warn(
+        "Service Worker setup failed",
+        error,
+      );
+    }
+  }
 
-    void registerServiceWorker();
-  }, []);
+  void setupServiceWorker();
+}, []);
 
 
   useEffect(() => {
@@ -1524,6 +1546,133 @@ export default function Home() {
     );
   }
 
+  function changeSelectedCourse(
+  nextCourseId: string,
+) {
+  if (!selectedTicket) {
+    return;
+  }
+
+  const currentCourse = courses.find(
+    (course) =>
+      course.id === selectedTicket.courseId,
+  );
+
+  const nextCourse = courses.find(
+    (course) => course.id === nextCourseId,
+  );
+
+  if (
+    !currentCourse ||
+    !nextCourse ||
+    currentCourse.id === nextCourse.id
+  ) {
+    return;
+  }
+
+  const difference =
+    nextCourse.price - currentCourse.price;
+
+  setTickets((current) =>
+    current.map((ticket) => {
+      if (ticket.id !== selectedTicket.id) {
+        return ticket;
+      }
+
+      const changeOrder: OrderItem = {
+        id: createId(),
+        productId: `course-change-${createId()}`,
+        name: `セット変更 ${currentCourse.name}→${nextCourse.name}`,
+        price: difference,
+        quantity: 1,
+      };
+
+      return refreshTicketAmounts({
+        ...ticket,
+        courseId: nextCourse.id,
+        orders:
+          difference === 0
+            ? ticket.orders
+            : [...ticket.orders, changeOrder],
+      });
+    }),
+  );
+
+  setShowTicketEdit(false);
+}
+
+function changeExtensionCourse(
+  nextCourseId: string,
+) {
+  if (!selectedTicket) {
+    return;
+  }
+
+  setTickets((current) =>
+    current.map((ticket) =>
+      ticket.id === selectedTicket.id
+        ? {
+            ...ticket,
+            extensionCourseId:
+              nextCourseId === ticket.courseId
+                ? undefined
+                : nextCourseId,
+          }
+        : ticket,
+    ),
+  );
+}
+function registerAdjustment(
+  type:
+    | "service"
+    | "amountDiscount"
+    | "percentDiscount",
+  amount: number,
+  reason: string,
+  percent?: number,
+) {
+  if (!selectedTicket) {
+    return;
+  }
+
+  const adjustmentName =
+    type === "service"
+      ? `サービス（${reason}）`
+      : type === "amountDiscount"
+        ? `金額割引（${reason}）`
+        : `${percent ?? 0}％割引（${reason}）`;
+
+  const adjustmentOrder: OrderItem = {
+    id: createId(),
+    productId: `adjustment-${type}-${createId()}`,
+    name: adjustmentName,
+    price: -amount,
+    quantity: 1,
+  };
+
+  setTickets((current) =>
+    current.map((ticket) =>
+      ticket.id === selectedTicket.id
+        ? refreshTicketAmounts({
+            ...ticket,
+            orders: [
+              ...ticket.orders,
+              adjustmentOrder,
+            ],
+          })
+        : ticket,
+    ),
+  );
+
+  recordAudit(
+    "追加",
+    "サービス・割引",
+    `${adjustmentName} -${formatYen(amount)}`,
+  );
+
+  setShowAdjustment(false);
+  setShowTicketEdit(false);
+}
   function addExtension(minutes: number, price: number) {
     if (!selectedTicket) {
       return;
@@ -2957,14 +3106,32 @@ export default function Home() {
                 </div>
 
                 <button
-                  type="button"
-                  onClick={() => setShowExtension(true)}
-                  className="mt-2 min-h-12 w-full rounded-xl bg-orange-700 p-3 text-lg font-bold"
-                >
-                  延長
-                </button>
+  type="button"
+  onClick={() => setShowExtension(true)}
+  className="mt-2 min-h-12 w-full rounded-xl bg-orange-700 p-3 text-lg font-bold"
+>
+  延長
+</button>
 
-                <div className="mt-3 grid grid-cols-3 gap-2">
+<button
+  type="button"
+  onClick={() => setShowTicketEdit(true)}
+  className="mt-2 min-h-12 w-full rounded-xl bg-blue-700 p-3 text-lg font-bold"
+>
+  ⚙️ 伝票修正
+</button>
+
+<button
+  type="button"
+  onClick={() =>
+    setShowAdjustment(true)
+  }
+  className="min-h-14 rounded-xl bg-pink-700 p-3 font-bold"
+>
+  サービス・割引
+</button>
+
+<div className="mt-3 grid grid-cols-3 gap-2">
                   <div className="rounded-xl bg-slate-800 p-3">
                     <p className="text-xs text-slate-400">伝票合計</p>
                     <p className="mt-1 text-lg font-bold">
@@ -3276,16 +3443,44 @@ export default function Home() {
           onClose={() => setPendingEventProduct(null)}
         />
       )}
+{showAdjustment && selectedTicket && (
+  <AdjustmentModal
+    currentTotal={calculateTicketTotal(
+      selectedTicket,
+    )}
+    onRegister={registerAdjustment}
+    onClose={() =>
+      setShowAdjustment(false)
+    }
+  />
+)}
 
+{showTicketEdit && selectedTicket && (
+  <TicketEditModal
+    courses={courses}
+    currentCourseId={selectedTicket.courseId}
+    extensionCourseId={
+      selectedTicket.extensionCourseId
+    }
+    onChangeCourse={changeSelectedCourse}
+    onChangeExtensionCourse={
+      changeExtensionCourse
+    }
+    onClose={() => setShowTicketEdit(false)}
+  />
+)}
       {showExtension && selectedTicket && (
         <ExtensionModal
-          courseId={selectedTicket.courseId}
-          onSelect={(minutes, price) => {
-            addExtension(minutes, price);
-            setShowExtension(false);
-          }}
-          onClose={() => setShowExtension(false)}
-        />
+  courseId={
+    selectedTicket.extensionCourseId ??
+    selectedTicket.courseId
+  }
+  onSelect={(minutes, price) => {
+    addExtension(minutes, price);
+    setShowExtension(false);
+  }}
+  onClose={() => setShowExtension(false)}
+/>
       )}
 
       {showReservation && selectedTicket && (

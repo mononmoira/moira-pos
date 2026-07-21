@@ -112,6 +112,9 @@ export default function StaffSelectModal({
           </button>
         </div>
       </div>
-    </div>
+      </div>
   );
 }
+
+   
+  

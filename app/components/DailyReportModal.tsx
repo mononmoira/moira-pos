@@ -279,43 +279,73 @@ tickets.forEach((ticket) => {
     >();
 
     for (const ticket of tickets) {
-      const companion = ticket.orders.some(
-        (order) =>
-          order.productId === "companion",
-      );
+      const companionStaffIds = new Set(
+  ticket.orders
+    .filter(
+      (order) =>
+        order.productId === "companion",
+    )
+    .flatMap(
+      (order) =>
+        order.assignedStaffIds ?? [],
+    ),
+);
 
-      const drinkTable = companion
-        ? companionDrinkBack
-        : normalDrinkBack;
 
       for (const order of ticket.orders) {
         let back = 0;
         const details: string[] = [];
 
-        if (
-          drinkTable[order.productId] &&
-          order.assignedStaffIds?.length
-        ) {
-          back =
-            drinkTable[order.productId] *
-            order.quantity;
+       if (
+  normalDrinkBack[order.productId] &&
+  order.assignedStaffIds?.length
+) {
+  const assignedStaffIds =
+    order.assignedStaffIds;
 
-          details.push(
-            `${
-              order.assignedStaffIds
-                .map(
-                  (id) =>
-                    staff.find(
-                      (person) =>
-                        person.id === id,
-                    )?.name ?? id,
-                )
-                .join("・")
-            }／${
-              companion ? "同伴席" : "通常席"
-            }`,
-          );
-        }
+  back =
+    assignedStaffIds.reduce(
+      (total, staffId) => {
+        const isCompanionStaff =
+          companionStaffIds.has(staffId);
+
+        const unit = isCompanionStaff
+          ? companionDrinkBack[
+              order.productId
+            ]
+          : normalDrinkBack[
+              order.productId
+            ];
+
+        return (
+          total +
+          unit * order.quantity
+        );
+      },
+      0,
+    );
+
+  details.push(
+    assignedStaffIds
+      .map((staffId) => {
+        const staffName =
+          staff.find(
+            (person) =>
+              person.id === staffId,
+          )?.name ?? staffId;
+
+        const isCompanionStaff =
+          companionStaffIds.has(staffId);
+
+        return `${staffName}／${
+          isCompanionStaff
+            ? "同伴ドリンク"
+            : "通常ドリンク"
+        }`;
+      })
+      .join("・"),
+  );
+}
 
         if (
           champagneBack[order.productId] &&
@@ -419,18 +449,19 @@ tickets.forEach((ticket) => {
         >();
 
         for (const ticket of tickets) {
-          const companion = ticket.orders.some(
-            (order) =>
-              order.productId === "companion",
-          );
+          const isCompanionStaff = ticket.orders.some(
+  (order) =>
+    order.productId === "companion" &&
+    order.assignedStaffIds?.includes(person.id),
+);
 
-          const drinkTable = companion
-            ? companionDrinkBack
-            : normalDrinkBack;
+const drinkTable = isCompanionStaff
+  ? companionDrinkBack
+  : normalDrinkBack;
 
-          const drinkLabels = companion
-            ? companionDrinkLabels
-            : normalDrinkLabels;
+const drinkLabels = isCompanionStaff
+  ? companionDrinkLabels
+  : normalDrinkLabels;
 
           for (const order of ticket.orders) {
             if (
@@ -453,14 +484,14 @@ tickets.forEach((ticket) => {
 
               addDetail(
                 detailMap,
-                `drink-${companion}-${order.productId}-${unit}`,
+                `drink-${isCompanionStaff}-${order.productId}-${unit}`,
                 {
                   label,
                   quantityLabel: "杯",
                   quantity: order.quantity,
                   unit,
                   total,
-                  order: companion ? 20 : 10,
+                  order: isCompanionStaff ? 20 : 10,
                 },
               );
             }

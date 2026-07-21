@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 
 import { createId } from "./lib/createId";
+import TodayTicketsPanel from "./components/TodayTicketsPanel";
 
-import TableGrid, {
-  type Seat,
-  type TableTicket,
+import type {
+  Seat,
+  TableTicket,
 } from "./components/TableGrid";
 
 import OrderModal, {
@@ -3010,12 +3011,13 @@ function registerAdjustment(
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <TableGrid
-                seats={seats}
-                tickets={tickets}
-                currentTime={currentTime}
-                onSelectTicket={setSelectedTicketId}
-              />
+              <TodayTicketsPanel
+  seats={seats}
+  tickets={tickets}
+  closedTickets={closedTickets}
+  currentTime={currentTime}
+  onSelectActiveTicket={setSelectedTicketId}
+/>
             </div>
           </section>
 

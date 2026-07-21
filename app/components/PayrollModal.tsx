@@ -52,8 +52,8 @@ const normalDrinkBack: Record<string, number> = {
 
 const companionDrinkBack: Record<string, number> = {
   castDrink: 400,
-  castJug: 500,
-  castShot: 500,
+  castJug: 600,
+  castShot: 600,
   castMega: 1600,
   castAnejo: 1100,
 };
@@ -155,39 +155,74 @@ export default function PayrollModal({
       let event = 0;
 
       for (const ticket of tickets) {
-        const companionSeat = ticket.orders.some(
-          (order) => order.productId === "companion",
-        );
-        const drinkTable = companionSeat ? companionDrinkBack : normalDrinkBack;
+  const companionStaffIds = new Set(
+    ticket.orders
+      .filter(
+        (order) =>
+          order.productId === "companion",
+      )
+      .flatMap(
+        (order) =>
+          order.assignedStaffIds ?? [],
+      ),
+  );
 
-        for (const order of ticket.orders) {
-          if (
-            order.assignedStaffIds?.includes(person.id) &&
-            drinkTable[order.productId]
-          ) {
-            drink += drinkTable[order.productId] * order.quantity;
-          }
+  const isCompanionStaff =
+    companionStaffIds.has(person.id);
 
-          const totalChampagneBack = champagneBack[order.productId];
-          if (
-            totalChampagneBack &&
-            order.assignedStaffIds?.includes(person.id)
-          ) {
-            const assignedCount = order.assignedStaffIds.length;
-            champagne +=
-              Math.floor(totalChampagneBack / assignedCount / 100) *
-              100 *
-              order.quantity;
-          }
+  const drinkTable = isCompanionStaff
+    ? companionDrinkBack
+    : normalDrinkBack;
 
-          const cups = order.eventCups?.[person.id] ?? 0;
-          event += cups * eventBackPerCup(order.productId);
+  for (const order of ticket.orders) {
+    if (
+      order.assignedStaffIds?.includes(
+        person.id,
+      ) &&
+      drinkTable[order.productId]
+    ) {
+      drink +=
+        drinkTable[order.productId] *
+        order.quantity;
+    }
 
-          if (order.representativeStaffId === person.id) {
-            event += 1000;
-          }
-        }
-      }
+    const totalChampagneBack =
+      champagneBack[order.productId];
+
+    if (
+      totalChampagneBack &&
+      order.assignedStaffIds?.includes(
+        person.id,
+      )
+    ) {
+      const assignedCount =
+        order.assignedStaffIds.length;
+
+      champagne +=
+        Math.floor(
+          totalChampagneBack /
+            assignedCount /
+            100,
+        ) *
+        100 *
+        order.quantity;
+    }
+
+    const cups =
+      order.eventCups?.[person.id] ?? 0;
+
+    event +=
+      cups *
+      eventBackPerCup(order.productId);
+
+    if (
+      order.representativeStaffId ===
+      person.id
+    ) {
+      event += 1000;
+    }
+  }
+}
 
       const staffAdjustments = adjustments.filter(
         (item) => item.staffId === person.id,

@@ -5,6 +5,8 @@ import { useMemo, useState } from "react";
 export type StaffRole =
   | "キャスト"
   | "ボーイ"
+  | "オーナー"
+  | "ママ"
   | "新規スタッフ"
   | "体入"
   | "臨時・応援";

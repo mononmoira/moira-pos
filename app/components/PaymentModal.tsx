@@ -12,11 +12,16 @@ type Props = {
   balance: number;
   customerName?: string;
   paymentMode: "prepaid" | "checkout";
-  onRegisterPayment: (
-    method: PaymentMethod,
-    amount: number,
-  ) => void;
-  onClose: () => void;
+
+onRegisterPayment: (
+  method: PaymentMethod,
+  amount: number,
+  discountAmount: number,
+  receivedAmount?: number,
+  changeAmount?: number,
+) => void;
+
+onClose: () => void;
 };
 
 function roundUpToThousand(value: number) {
@@ -37,6 +42,62 @@ export default function PaymentModal({
 
   const [receivedAmount, setReceivedAmount] =
     useState(roundUpToThousand(balance));
+
+    const [customDiscountAmount, setCustomDiscountAmount] =
+  useState(0);
+
+    const [discountType, setDiscountType] = useState<
+  "none"
+| "500"
+| "1000"
+| "2000"
+| "5000"
+| "10%"
+| "20%"
+| "30%"
+| "custom"
+
+>("none");
+
+const discountAmount = useMemo(() => {
+  switch (discountType) {
+    case "500":
+      return Math.min(500, balance);
+
+    case "1000":
+      return Math.min(1000, balance);
+
+    case "2000":
+      return Math.min(2000, balance);
+
+    case "5000":
+      return Math.min(5000, balance);
+
+    case "10%":
+      return Math.ceil(balance * 0.1);
+
+    case "20%":
+      return Math.ceil(balance * 0.2);
+
+    case "30%":
+      return Math.ceil(balance * 0.3);
+
+      case "custom":
+  return Math.min(customDiscountAmount, balance);
+
+    default:
+      return 0;
+  }
+}, [
+  discountType,
+  customDiscountAmount,
+  balance,
+]);
+
+const discountedBalance = Math.max(
+  balance - discountAmount,
+  0,
+);
 
   const surcharge = useMemo(
     () =>
@@ -89,6 +150,65 @@ export default function PaymentModal({
       setReceivedAmount(roundUpToThousand(amount));
     }
   };
+
+  const handleDiscountChange = (
+  value:
+    | "none"
+    | "500"
+    | "1000"
+    | "2000"
+    | "5000"
+    | "10%"
+    | "20%"
+    | "30%",
+) => {
+  setDiscountType(value);
+
+  let nextDiscount = 0;
+
+  switch (value) {
+    case "500":
+      nextDiscount = 500;
+      break;
+
+    case "1000":
+      nextDiscount = 1000;
+      break;
+
+    case "2000":
+      nextDiscount = 2000;
+      break;
+
+    case "5000":
+      nextDiscount = 5000;
+      break;
+
+    case "10%":
+      nextDiscount = Math.ceil(balance * 0.1);
+      break;
+
+    case "20%":
+      nextDiscount = Math.ceil(balance * 0.2);
+      break;
+
+    case "30%":
+      nextDiscount = Math.ceil(balance * 0.3);
+      break;
+  }
+
+  const nextAmount = Math.max(
+    balance - Math.min(nextDiscount, balance),
+    0,
+  );
+
+  setAmount(nextAmount);
+
+  if (method === "現金") {
+    setReceivedAmount(
+      roundUpToThousand(nextAmount),
+    );
+  }
+};
 
   const handleAmountChange = (value: number) => {
     const nextAmount = Math.max(
@@ -152,6 +272,103 @@ export default function PaymentModal({
               : "売掛には顧客設定が必要です。"}
           </div>
         )}
+
+        <label className="mt-5 block font-bold">
+  サービス割引
+</label>
+
+<div className="mt-2 grid grid-cols-2 gap-3">
+  {[
+    ["none", "なし"],
+    ["500", "−500円"],
+    ["1000", "−1,000円"],
+    ["2000", "−2,000円"],
+    ["5000", "−5,000円"],
+    ["10%", "10％"],
+    ["20%", "20％"],
+    ["30%", "30％"],
+  ].map(([value, label]) => (
+    <button
+      key={value}
+      type="button"
+      onClick={() =>
+        handleDiscountChange(
+          value as
+            | "none"
+            | "500"
+            | "1000"
+            | "2000"
+            | "5000"
+            | "10%"
+            | "20%"
+            | "30%",
+        )
+      }
+      className={`min-h-14 rounded-xl px-2 font-bold ${
+        discountType === value
+          ? "bg-pink-600"
+          : "bg-slate-700"
+      }`}
+    >
+      {label}
+    </button>
+  ))}
+</div>
+<label className="mt-4 block font-bold">
+  自由割引
+</label>
+
+<input
+  type="number"
+  inputMode="numeric"
+  min={0}
+  max={balance}
+  value={customDiscountAmount}
+  onChange={(e) => {
+    const value = Math.min(
+      Math.max(Number(e.target.value), 0),
+      balance,
+    );
+
+    setCustomDiscountAmount(value);
+    setDiscountType("custom");
+
+    const nextAmount = Math.max(
+  balance - value,
+  0,
+);
+
+setAmount(nextAmount);
+
+if (method === "現金") {
+  setReceivedAmount(
+    roundUpToThousand(nextAmount),
+  );
+}
+
+  }}
+  placeholder="例：1500"
+  className="mt-2 w-full rounded-xl bg-slate-800 p-4 text-xl"
+/>
+{discountAmount > 0 && (
+  <div className="mt-4 rounded-xl bg-amber-950 p-4 text-amber-100">
+    <div className="flex justify-between">
+      <span>サービス割引</span>
+
+      <strong>
+        −{discountAmount.toLocaleString()}円
+      </strong>
+    </div>
+
+    <div className="mt-2 flex justify-between text-xl">
+      <span>割引後</span>
+
+      <strong>
+        {discountedBalance.toLocaleString()}円
+      </strong>
+    </div>
+  </div>
+)}
 
         <label className="mt-5 block font-bold">
           元の支払額
@@ -290,9 +507,21 @@ export default function PaymentModal({
           <button
   type="button"
   disabled={paymentDisabled}
+
   onClick={() =>
-    onRegisterPayment(method, amount)
-  }
+  onRegisterPayment(
+    method,
+    amount,
+    discountAmount,
+    method === "現金"
+      ? receivedAmount
+      : undefined,
+    method === "現金"
+      ? change
+      : undefined,
+  )
+}
+
   className="min-h-14 rounded-xl bg-pink-600 font-bold disabled:bg-slate-600 disabled:text-slate-400"
 >
   {paymentMode === "prepaid"

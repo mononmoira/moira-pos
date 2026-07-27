@@ -65,6 +65,10 @@ const normalDrinkLabels: Record<string, string> = {
   castMega: "メガジョッキ",
   castAnejo: "アネホ",
 };
+const BACK_EXCLUDED_STAFF = [
+  "azusa",
+  "owner",
+];
 
 const companionDrinkLabels: Record<string, string> = {
   castDrink: "同伴通常ドリンク",
@@ -438,6 +442,38 @@ tickets.forEach((ticket) => {
   const staffRows = useMemo(
     () =>
       staff.map((person) => {
+        if (BACK_EXCLUDED_STAFF.includes(person.id)) {
+  return {
+    person,
+    mins: workMinutes(
+      person.clockIn,
+      person.clockOut,
+      currentTime,
+    ),
+    hourly: Math.floor(
+      (workMinutes(
+        person.clockIn,
+        person.clockOut,
+        currentTime,
+      ) * person.hourlyWage) / 60,
+    ),
+    drink: 0,
+    champagne: 0,
+    event: 0,
+    reservation: 0,
+    transport: 0,
+    parking: 0,
+    gross: Math.floor(
+      (workMinutes(
+        person.clockIn,
+        person.clockOut,
+        currentTime,
+      ) * person.hourlyWage) / 60,
+    ),
+    paid: 0,
+    details: [],
+  };
+}
         let drink = 0;
         let champagne = 0;
         let event = 0;

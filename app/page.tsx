@@ -74,6 +74,11 @@ type Payment = {
   amount: number;
   appliedAmount?: number;
   surchargeAmount?: number;
+
+  receivedAmount?: number;   // お預かり
+  changeAmount?: number;     // おつり
+  discountAmount?: number;   // サービス割引
+
   paidAt: string;
 };
 
@@ -229,6 +234,11 @@ export type Ticket = TableTicket & {
   courseId: string;
   extensionCourseId?: string;
   courseTotal: number;
+
+  // 追加
+  customerCount: number; // お客様人数
+  setPrice: number;      // 1名あたりのセット料金
+
   orders: OrderItem[];
   payments: Payment[];
   reservationEntries?: ReservationEntry[];
@@ -284,7 +294,7 @@ type PendingStaffSelection =
     }
   | {
       mode: "multiple";
-      purpose: "companion" | "champagne";
+      purpose: "companion" | "castAdd" | "champagne";
       product: Product;
     }
   | null;
@@ -309,6 +319,7 @@ const courses: Course[] = [
 
 const products: Product[] = [
   { id: "companion", name: "同伴", category: "同伴", price: 1000 },
+  { id: "castAdd", name: "キャスト追加", category: "同伴", price: 1000 },
 
   { id: "castDrink", name: "通常ドリンク", category: "キャストドリンク", price: 1000 },
   { id: "castJug", name: "ジョッキ", category: "キャストドリンク", price: 1500 },
@@ -363,8 +374,12 @@ const products: Product[] = [
 ];
 
 const initialStaff: Staff[] = [
-  { id: "masaki", name: "まさき", role: "ボーイ", hourlyWage: 1900, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
+ { id: "masaki", name: "まさき", role: "ボーイ", hourlyWage: 1900, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "yuu", name: "ゆう", role: "キャスト", hourlyWage: 2600, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
+  
+  { id: "azusa", name: "あずさ", role: "ママ", hourlyWage: 0, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
+  { id: "owner", name: "オーナー", role: "オーナー", hourlyWage: 0, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
+
   { id: "meira", name: "めいら", role: "キャスト", hourlyWage: 2500, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "fumika", name: "ふみか", role: "キャスト", hourlyWage: 2400, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "nanami", name: "ななみ", role: "キャスト", hourlyWage: 2400, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
@@ -792,7 +807,40 @@ export default function Home() {
         tickets: Array.isArray(saved?.tickets) ? saved.tickets : [],
         closedTickets: Array.isArray(saved?.closedTickets) ? saved.closedTickets : [],
         businessReports: Array.isArray(saved?.businessReports) ? saved.businessReports : [],
-        staff: Array.isArray(saved?.staff) && saved.staff.length > 0 ? saved.staff : initialStaff,
+       staff: (() => {
+  const current =
+    Array.isArray(saved?.staff) && saved.staff.length > 0
+      ? saved.staff
+      : initialStaff;
+
+  const extra = [
+    {
+      id: "azusa",
+      name: "あずさ",
+      role: "キャスト",
+      hourlyWage: 0,
+      paymentCycle: "当日日払い",
+      clockIn: null,
+      clockOut: null,
+    },
+    {
+      id: "owner2",
+      name: "オーナー",
+      role: "ボーイ",
+      hourlyWage: 0,
+      paymentCycle: "当日日払い",
+      clockIn: null,
+      clockOut: null,
+    },
+  ];
+
+  return [
+    ...current,
+    ...extra.filter(
+      (s) => !current.some((c) => c.id === s.id),
+    ),
+  ];
+})(),
         payrollAdjustments: Array.isArray(saved?.payrollAdjustments) ? saved.payrollAdjustments : [],
         payrollPayments: Array.isArray(saved?.payrollPayments) ? saved.payrollPayments : [],
         customers: Array.isArray(saved?.customers)
@@ -943,6 +991,32 @@ export default function Home() {
       calculateTicketTotal(ticket) - calculatePaidTotal(ticket),
     );
   }
+  function roundUp100(value: number) {
+  return Math.ceil(value / 100) * 100;
+}
+
+function calculateAdditionalGuestPrice(
+  courseMinutes: number,
+  setPrice: number,
+  remainingMinutes: number,
+) {
+  if (remainingMinutes < 5) return 0;
+
+  if (courseMinutes >= 90) {
+    if (remainingMinutes >= 61) return 3500;
+    if (remainingMinutes >= 46) return 2400;
+    if (remainingMinutes >= 31) return 1800;
+    if (remainingMinutes >= 16) return 1200;
+    return 600;
+  }
+
+  if (remainingMinutes >= 41) return setPrice;
+  if (remainingMinutes >= 31) return roundUp100(setPrice * (2 / 3));
+  if (remainingMinutes >= 21) return roundUp100(setPrice * (1 / 2));
+  if (remainingMinutes >= 11) return roundUp100(setPrice * (1 / 3));
+
+  return roundUp100(setPrice * (1 / 6));
+}
 
   function refreshTicketAmounts(ticket: Ticket): Ticket {
     return {
@@ -1000,6 +1074,11 @@ export default function Home() {
       customerName: selectedCustomer?.name,
       total: courseTotal,
       balance: courseTotal,
+     customerCount: guestCount,
+setPrice:
+  guestCount > 0
+    ? courseTotal / guestCount
+    : courseTotal,
     };
 
     setTickets((current) => [...current, newTicket]);
@@ -1043,15 +1122,20 @@ export default function Home() {
   }
 
   function requestProduct(product: Product) {
-    if (product.category === "同伴") {
-      setShowOrder(false);
-      setPendingStaffSelection({
-        mode: "multiple",
-        purpose: "companion",
-        product,
-      });
-      return;
-    }
+    if (product.id === "companion") {
+  setShowOrder(false);
+  setPendingStaffSelection({
+    mode: "multiple",
+    purpose: "companion",
+    product,
+  });
+  return;
+}
+
+if (product.id === "castAdd") {
+  addPlainProduct(product);
+  return;
+}
 
     if (product.category === "キャストドリンク") {
       setShowOrder(false);
@@ -1205,6 +1289,69 @@ export default function Home() {
 
     setPendingEventProduct(null);
   }
+function addGuestToSelectedTicket(addCount = 1) {
+  if (!selectedTicket || addCount <= 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const endTime = new Date(selectedTicket.endAt).getTime();
+
+  const remainingMinutes = Math.max(
+    Math.ceil((endTime - now) / 60000),
+    0,
+  );
+
+  const courseMinutes = Math.round(
+    (new Date(selectedTicket.endAt).getTime() -
+      new Date(selectedTicket.startedAt).getTime()) /
+      60000,
+  );
+
+  const additionalPricePerPerson =
+    calculateAdditionalGuestPrice(
+      courseMinutes,
+      selectedTicket.setPrice,
+      remainingMinutes,
+    );
+
+  if (additionalPricePerPerson <= 0) {
+    const shouldAdd = window.confirm(
+      "残り時間が5分未満のため、追加セット料金は0円です。\nお客様数だけ追加しますか？",
+    );
+
+    if (!shouldAdd) {
+      return;
+    }
+  }
+
+  const additionalOrder: OrderItem = {
+    id: createId(),
+    productId: "additional-guest-set",
+    name: `途中追加セット（${addCount}名・残り${remainingMinutes}分）`,
+    price: additionalPricePerPerson,
+    quantity: addCount,
+    assignedStaffIds: [],
+  };
+
+  setTickets((current) =>
+    current.map((ticket) =>
+      ticket.id === selectedTicket.id
+        ? refreshTicketAmounts({
+            ...ticket,
+            guests: ticket.guests + addCount,
+            customerCount:
+              (ticket.customerCount ?? ticket.guests) +
+              addCount,
+            orders:
+              additionalPricePerPerson > 0
+                ? [...ticket.orders, additionalOrder]
+                : ticket.orders,
+          })
+        : ticket,
+    ),
+  );
+}
 
   function saveReservationEntries(
     entries: ReservationEntry[],
@@ -1315,9 +1462,13 @@ export default function Home() {
   }
 
   function registerPayment(
-    method: PaymentMethod,
-    baseAmount: number,
-  ) {
+  method: PaymentMethod,
+  baseAmount: number,
+  discountAmount: number,
+  receivedAmount?: number,
+  changeAmount?: number,
+) {
+
     if (!selectedTicket) return;
 
     const currentBalance = calculateBalance(selectedTicket);
@@ -1348,14 +1499,31 @@ export default function Home() {
     const chargedAmount =
       baseAmount + surchargeAmount;
 
-    const payment: Payment = {
-      id: createId(),
-      method,
-      amount: chargedAmount,
-      appliedAmount: baseAmount,
-      surchargeAmount,
-      paidAt: new Date().toISOString(),
-    };
+     const discountOrder =
+  discountAmount > 0
+    ? {
+        id: createId(),
+        productId: `service-discount-${createId()}`,
+        name: "サービス割引",
+        price: -discountAmount,
+        quantity: 1,
+      }
+    : null;
+
+const payment: Payment = {
+  id: createId(),
+  method,
+  amount: chargedAmount,
+  appliedAmount: baseAmount,
+  surchargeAmount,
+  receivedAmount:
+    method === "現金" ? receivedAmount : undefined,
+  changeAmount:
+    method === "現金" ? changeAmount : undefined,
+  discountAmount,
+  paidAt: new Date().toISOString(),
+};
+
 
     setTickets((current) =>
       current.map((ticket) => {
@@ -1376,9 +1544,16 @@ export default function Home() {
 
         return refreshTicketAmounts({
           ...ticket,
-          orders: surchargeOrder
-            ? [...ticket.orders, surchargeOrder]
-            : ticket.orders,
+          orders: [
+  ...ticket.orders,
+  ...(discountOrder
+    ? [discountOrder]
+    : []),
+  ...(surchargeOrder
+    ? [surchargeOrder]
+    : []),
+],
+
           payments: [...ticket.payments, payment],
         });
       }),
@@ -3059,7 +3234,7 @@ function registerAdjustment(
                 </div>
  {selectedTicket && (
   <div>
-    <div className="mt-3 grid grid-cols-3 gap-2">
+    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
       <button
         type="button"
         onClick={() => setShowOrder(true)}
@@ -3067,6 +3242,14 @@ function registerAdjustment(
       >
         ＋ 注文追加
       </button>
+
+<button
+  type="button"
+  onClick={() => addGuestToSelectedTicket(1)}
+  className="min-h-14 rounded-xl bg-emerald-600 p-3 text-lg font-bold"
+>
+  ＋ お客様追加
+</button>
 
       <button
         type="button"

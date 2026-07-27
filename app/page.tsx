@@ -808,31 +808,32 @@ export default function Home() {
         closedTickets: Array.isArray(saved?.closedTickets) ? saved.closedTickets : [],
         businessReports: Array.isArray(saved?.businessReports) ? saved.businessReports : [],
        staff: (() => {
-  const current =
-    Array.isArray(saved?.staff) && saved.staff.length > 0
-      ? saved.staff
-      : initialStaff;
+  
+        const current: Staff[] =
+  Array.isArray(saved?.staff) && saved.staff.length > 0
+    ? (saved.staff as Staff[])
+    : initialStaff;
 
-  const extra = [
-    {
-      id: "azusa",
-      name: "あずさ",
-      role: "キャスト",
-      hourlyWage: 0,
-      paymentCycle: "当日日払い",
-      clockIn: null,
-      clockOut: null,
-    },
-    {
-      id: "owner2",
-      name: "オーナー",
-      role: "ボーイ",
-      hourlyWage: 0,
-      paymentCycle: "当日日払い",
-      clockIn: null,
-      clockOut: null,
-    },
-  ];
+  const extra: Staff[] = [
+  {
+    id: "azusa",
+    name: "あずさ",
+    role: "キャスト",
+    hourlyWage: 0,
+    paymentCycle: "当日日払い",
+    clockIn: null,
+    clockOut: null,
+  },
+  {
+    id: "owner",
+    name: "オーナー",
+    role: "ボーイ",
+    hourlyWage: 0,
+    paymentCycle: "当日日払い",
+    clockIn: null,
+    clockOut: null,
+  },
+];
 
   return [
     ...current,

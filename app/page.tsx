@@ -1,9 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import dynamic from "next/dynamic";
 
 import { createId } from "./lib/createId";
+import {
+  doc,
+  onSnapshot,
+  setDoc,
+} from "firebase/firestore";
+
+import { db } from "./lib/firebase";
+
 import TodayTicketsPanel from "./components/TodayTicketsPanel";
 
 import type {
@@ -818,7 +831,7 @@ export default function Home() {
   {
     id: "azusa",
     name: "あずさ",
-    role: "キャスト",
+    role: "ママ",
     hourlyWage: 0,
     paymentCycle: "当日日払い",
     clockIn: null,
@@ -827,7 +840,7 @@ export default function Home() {
   {
     id: "owner",
     name: "オーナー",
-    role: "ボーイ",
+    role: "オーナー",
     hourlyWage: 0,
     paymentCycle: "当日日払い",
     clockIn: null,
@@ -835,12 +848,14 @@ export default function Home() {
   },
 ];
 
-  return [
-    ...current,
-    ...extra.filter(
-      (s) => !current.some((c) => c.id === s.id),
-    ),
-  ];
+ const mergedStaff: Staff[] = [
+  ...current,
+  ...extra.filter(
+    (s) => !current.some((c) => c.id === s.id),
+  ),
+];
+
+return mergedStaff;
 })(),
         payrollAdjustments: Array.isArray(saved?.payrollAdjustments) ? saved.payrollAdjustments : [],
         payrollPayments: Array.isArray(saved?.payrollPayments) ? saved.payrollPayments : [],

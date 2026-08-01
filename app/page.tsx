@@ -583,6 +583,7 @@ export default function Home() {
   const [businessReports, setBusinessReports] =
     useState<BusinessReport[]>([]);
   const [staff, setStaff] = useState<Staff[]>(initialStaff);
+  const cloudStaffReadyRef = useRef(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>(initialUsers);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -926,32 +927,174 @@ return mergedStaff;
     }
   }, [modeReady, isTestMode, loadAttempt]);
 
+ useEffect(() => {
+  if (
+    !dataLoaded ||
+    !canPersist ||
+    isTestMode
+  ) {
+    return;
+  }
+
+  const staffDocument = doc(
+    db,
+    "stores",
+    "moira",
+    "shared",
+    "staff",
+  );
+
+  const unsubscribe = onSnapshot(
+    staffDocument,
+    async (snapshot) => {
+      if (!snapshot.exists()) {
+        try {
+          await setDoc(staffDocument, {
+            staff,
+            updatedAt:
+              new Date().toISOString(),
+          });
+
+          cloudStaffReadyRef.current = true;
+        } catch (error) {
+          console.error(
+            "初回のスタッフ保存に失敗しました。",
+            error,
+          );
+        }
+
+        return;
+      }
+
+      const data = snapshot.data();
+
+      const cloudStaff = Array.isArray(
+        data.staff,
+      )
+        ? (data.staff as Staff[])
+        : [];
+
+      if (cloudStaff.length > 0) {
+        setStaff((current) => {
+          const same =
+            JSON.stringify(current) ===
+            JSON.stringify(cloudStaff);
+
+          return same ? current : cloudStaff;
+        });
+      }
+
+      cloudStaffReadyRef.current = true;
+    },
+    (error) => {
+      console.error(
+        "スタッフの受信に失敗しました。",
+        error,
+      );
+    },
+  );
+
+  return unsubscribe;
+}, [
+  dataLoaded,
+  canPersist,
+  isTestMode,
+]);
+
+useEffect(() => {
+  if (
+    !dataLoaded ||
+    !canPersist ||
+    isTestMode ||
+    !cloudStaffReadyRef.current
+  ) {
+    return;
+  }
+
+  const timer = window.setTimeout(
+    async () => {
+      try {
+        const staffDocument = doc(
+          db,
+          "stores",
+          "moira",
+          "shared",
+          "staff",
+        );
+
+        await setDoc(
+          staffDocument,
+          {
+            staff,
+            updatedAt:
+              new Date().toISOString(),
+          },
+          { merge: true },
+        );
+      } catch (error) {
+        console.error(
+          "スタッフのクラウド保存に失敗しました。",
+          error,
+        );
+      }
+    },
+    500,
+  );
+
+  return () =>
+    window.clearTimeout(timer);
+}, [
+  staff,
+  dataLoaded,
+  canPersist,
+  isTestMode,
+]);
+
   useEffect(() => {
     if (!dataLoaded || !canPersist) return;
 
     setSaveStatus("保存中");
 
-    const timer = window.setTimeout(() => {
-      const snapshot = {
-        tickets,
-        closedTickets,
-        businessReports,
-        staff,
-        payrollAdjustments,
-        payrollPayments,
-        customers,
-        appUsers,
-        auditLogs,
-        calendarReservations,
-        currentUserId,
-        receivables,
-        businessSession,
-        updatedAt: new Date().toISOString(),
-      };
+   const timer = window.setTimeout(async () => {
+  const snapshot = {
+    tickets,
+    closedTickets,
+    businessReports,
+    staff,
+    payrollAdjustments,
+    payrollPayments,
+    customers,
+    appUsers,
+    auditLogs,
+    calendarReservations,
+    currentUserId,
+    receivables,
+    businessSession,
+    updatedAt: new Date().toISOString(),
+  };
 
-      const persisted = saveOfflineSnapshot(snapshot, getOfflineStorageKey(isTestMode));
-      setSaveStatus(persisted ? "保存済み" : "保存失敗");
-    }, 300);
+  const persisted = saveOfflineSnapshot(
+    snapshot,
+    getOfflineStorageKey(isTestMode),
+  );
+
+  try {
+    await setDoc(
+      doc(db, "shared", "main"),
+      snapshot,
+      { merge: true },
+    );
+  } catch (error) {
+    console.error(
+      "Firestoreへの保存に失敗しました。",
+      error,
+    );
+  }
+
+  setSaveStatus(
+    persisted ? "保存済み" : "保存失敗",
+  );
+}, 300);
 
     return () => window.clearTimeout(timer);
   }, [

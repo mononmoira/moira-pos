@@ -1050,6 +1050,106 @@ useEffect(() => {
   isTestMode,
 ]);
 
+useEffect(() => {
+  if (!dataLoaded || !canPersist || isTestMode) {
+    return;
+  }
+
+  const sharedDocument = doc(db, "shared", "main");
+
+  const unsubscribe = onSnapshot(
+    sharedDocument,
+    (documentSnapshot) => {
+      if (!documentSnapshot.exists()) {
+        return;
+      }
+
+      const cloudData = documentSnapshot.data();
+
+      if (Array.isArray(cloudData.tickets)) {
+        setTickets(cloudData.tickets as Ticket[]);
+      }
+
+      if (Array.isArray(cloudData.closedTickets)) {
+        setClosedTickets(
+          cloudData.closedTickets as ClosedTicket[],
+        );
+      }
+
+      if (Array.isArray(cloudData.businessReports)) {
+        setBusinessReports(
+          cloudData.businessReports as BusinessReport[],
+        );
+      }
+
+      if (Array.isArray(cloudData.staff)) {
+        setStaff(cloudData.staff as Staff[]);
+      }
+
+      if (Array.isArray(cloudData.payrollAdjustments)) {
+        setPayrollAdjustments(
+          cloudData.payrollAdjustments as PayrollAdjustment[],
+        );
+      }
+
+      if (Array.isArray(cloudData.payrollPayments)) {
+        setPayrollPayments(
+          cloudData.payrollPayments as PayrollPayment[],
+        );
+      }
+
+      if (Array.isArray(cloudData.customers)) {
+        setCustomers(cloudData.customers as Customer[]);
+      }
+
+      if (Array.isArray(cloudData.appUsers)) {
+        setAppUsers(cloudData.appUsers as AppUser[]);
+      }
+
+      if (Array.isArray(cloudData.auditLogs)) {
+        setAuditLogs(cloudData.auditLogs as AuditLog[]);
+      }
+
+      if (Array.isArray(cloudData.calendarReservations)) {
+        setCalendarReservations(
+          cloudData.calendarReservations as CalendarReservation[],
+        );
+      }
+
+      if (typeof cloudData.currentUserId === "string") {
+        setCurrentUserId(cloudData.currentUserId);
+      }
+
+      if (Array.isArray(cloudData.receivables)) {
+        setReceivables(
+          cloudData.receivables as Receivable[],
+        );
+      }
+
+      if (
+        cloudData.businessSession === null ||
+        typeof cloudData.businessSession === "object"
+      ) {
+        setBusinessSession(
+          cloudData.businessSession as BusinessSession | null,
+        );
+      }
+    },
+    (error) => {
+      console.error(
+        "Firestoreからの受信に失敗しました。",
+        error,
+      );
+    },
+  );
+
+  return unsubscribe;
+}, [
+  dataLoaded,
+  canPersist,
+  isTestMode,
+]);
+
   useEffect(() => {
     if (!dataLoaded || !canPersist) return;
 

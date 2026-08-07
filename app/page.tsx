@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import { createId } from "./lib/createId";
 import {
   doc,
+  getDoc,
   onSnapshot,
   setDoc,
 } from "firebase/firestore";
@@ -50,6 +51,7 @@ import ReceivablesModal from "./components/ReceivablesModal";
 import ExtensionModal from "./components/ExtensionModal";
 import HistoryHubModal from "./components/HistoryHubModal";
 import DrawerModal from "./components/DrawerModal";
+import MemberManagementModal from "./components/MemberManagementModal";
 import {
   clearOfflineSnapshot,
   getOnlineStatus,
@@ -328,11 +330,17 @@ const courses: Course[] = [
   { id: "single", name: "シングル", minutes: 60, price: 3500 },
   { id: "oneToOne", name: "マンツーマン", minutes: 60, price: 4000 },
   { id: "bottleKeep", name: "ボトルキープ", minutes: 90, price: 3500 },
+  { id: "normal30", name: "30分セット", minutes: 30, price: 1500 },
+  { id: "cocktail30", name: "30分セット", minutes: 30, price: 1750 },
+  { id: "oneToOne30", name: "30分セット", minutes: 30, price: 2000 },
+
+  { id: "set45", name: "45分セット", minutes: 45, price: 1750 },
 ];
 
 const products: Product[] = [
   { id: "companion", name: "同伴", category: "同伴", price: 1000 },
   { id: "castAdd", name: "キャスト追加", category: "同伴", price: 1000 },
+  { id: "castAdd30", name: "キャスト追加 ハーフ", category: "同伴", price: 500 },
 
   { id: "castDrink", name: "通常ドリンク", category: "キャストドリンク", price: 1000 },
   { id: "castJug", name: "ジョッキ", category: "キャストドリンク", price: 1500 },
@@ -384,6 +392,20 @@ const products: Product[] = [
   { id: "cocktail800", name: "カクテル800", category: "単品", price: 800 },
   { id: "softDrink", name: "ソフトドリンク", category: "単品", price: 400 },
   { id: "sake", name: "日本酒", category: "単品", price: 1500 },
+  { id: "single150", name: "単品 150円", category: "単品", price: 150 },
+  { id: "single200", name: "単品 200円", category: "単品", price: 200 },
+  { id: "single250", name: "単品 250円", category: "単品", price: 250 },
+  { id: "single300", name: "単品 300円", category: "単品", price: 300 },
+  { id: "single350", name: "単品 350円", category: "単品", price: 350 },
+  { id: "single400", name: "単品 400円", category: "単品", price: 400 },
+  { id: "single450", name: "単品 450円", category: "単品", price: 450 },
+  { id: "single500", name: "単品 500円", category: "単品", price: 500 },
+  { id: "single550", name: "単品 550円", category: "単品", price: 550 },
+  { id: "single600", name: "単品 600円", category: "単品", price: 600 },
+  { id: "single650", name: "単品 650円", category: "単品", price: 650 },
+  { id: "single700", name: "単品 700円", category: "単品", price: 700 },
+  { id: "single750", name: "単品 750円", category: "単品", price: 750 },
+  { id: "single800", name: "単品 800円", category: "単品", price: 800 },
 ];
 
 const initialStaff: Staff[] = [
@@ -604,6 +626,10 @@ export default function Home() {
   const [hasMounted, setHasMounted] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [canPersist, setCanPersist] = useState(false);
+  const [cloudSyncReady, setCloudSyncReady] = useState(false);
+  const syncingRef = useRef(false);
+const [showInitialSync, setShowInitialSync] = useState(false);
+const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [runtimeErrors, setRuntimeErrors] = useState<string[]>([]);
@@ -629,6 +655,8 @@ export default function Home() {
   const [showPayroll, setShowPayroll] = useState(false);
   const [showReservation, setShowReservation] = useState(false);
   const [showCustomers, setShowCustomers] = useState(false);
+  const [showMemberManagement, setShowMemberManagement] =
+  useState(false);
   const [showReservationCalendar, setShowReservationCalendar] =
     useState(false);
   const [showExtension, setShowExtension] = useState(false);
@@ -1059,28 +1087,43 @@ useEffect(() => {
 
   const unsubscribe = onSnapshot(
     sharedDocument,
-    (documentSnapshot) => {
-      if (!documentSnapshot.exists()) {
-        return;
-      }
+    
+      (documentSnapshot) => {
+
+  syncingRef.current = true;
+
+  if (!documentSnapshot.exists()) {
+
+  setCloudSyncReady(true);
+  syncingRef.current = false;
+  return;
+}  
 
       const cloudData = documentSnapshot.data();
 
       if (Array.isArray(cloudData.tickets)) {
-        setTickets(cloudData.tickets as Ticket[]);
-      }
+  setTickets(prev =>
+    JSON.stringify(prev) === JSON.stringify(cloudData.tickets)
+      ? prev
+      : (cloudData.tickets as Ticket[])
+  );
+}
 
-      if (Array.isArray(cloudData.closedTickets)) {
-        setClosedTickets(
-          cloudData.closedTickets as ClosedTicket[],
-        );
-      }
+if (Array.isArray(cloudData.closedTickets)) {
+  setClosedTickets(prev =>
+    JSON.stringify(prev) === JSON.stringify(cloudData.closedTickets)
+      ? prev
+      : (cloudData.closedTickets as ClosedTicket[])
+  );
+}
 
-      if (Array.isArray(cloudData.businessReports)) {
-        setBusinessReports(
-          cloudData.businessReports as BusinessReport[],
-        );
-      }
+if (Array.isArray(cloudData.businessReports)) {
+  setBusinessReports(prev =>
+    JSON.stringify(prev) === JSON.stringify(cloudData.businessReports)
+      ? prev
+      : (cloudData.businessReports as BusinessReport[])
+  );
+}
 
       if (Array.isArray(cloudData.staff)) {
         setStaff(cloudData.staff as Staff[]);
@@ -1134,6 +1177,21 @@ useEffect(() => {
           cloudData.businessSession as BusinessSession | null,
         );
       }
+
+      if (
+  cloudData.businessSession === null ||
+  typeof cloudData.businessSession === "object"
+) {
+  setBusinessSession(
+    cloudData.businessSession as BusinessSession | null,
+  );
+}
+
+setCloudSyncReady(true);
+
+setTimeout(() => {
+  syncingRef.current = false;
+}, 500);
     },
     (error) => {
       console.error(
@@ -1149,11 +1207,17 @@ useEffect(() => {
   canPersist,
   isTestMode,
 ]);
+useEffect(() => {
+ if (
+  syncingRef.current ||
+  !dataLoaded ||
+  !canPersist ||
+  isTestMode ||
+  !cloudSyncReady
+) 
+  return;
 
-  useEffect(() => {
-    if (!dataLoaded || !canPersist) return;
-
-    setSaveStatus("保存中");
+if (saveStatus === "保存中") return;
 
    const timer = window.setTimeout(async () => {
   const snapshot = {
@@ -1198,23 +1262,25 @@ useEffect(() => {
 
     return () => window.clearTimeout(timer);
   }, [
-    tickets,
-    closedTickets,
-    businessReports,
-    staff,
-    payrollAdjustments,
-    payrollPayments,
-    customers,
-    appUsers,
-    auditLogs,
-    calendarReservations,
-    currentUserId,
-    receivables,
-    businessSession,
-    dataLoaded,
-    canPersist,
-    isTestMode,
-  ]);
+  tickets,
+  closedTickets,
+  businessReports,
+  staff,
+  payrollAdjustments,
+  payrollPayments,
+  customers,
+  appUsers,
+  auditLogs,
+  calendarReservations,
+  currentUserId,
+  receivables,
+  businessSession,
+  dataLoaded,
+  canPersist,
+  isTestMode,
+  cloudSyncReady,
+  saveStatus,
+]);
 
   const occupiedSeatIds = useMemo(
     () => new Set(tickets.map((ticket) => ticket.seatId)),
@@ -1284,6 +1350,25 @@ function calculateAdditionalGuestPrice(
       balance: calculateBalance(ticket),
     };
   }
+
+  function createCurrentSnapshot() {
+  return {
+    tickets,
+    closedTickets,
+    businessReports,
+    staff,
+    payrollAdjustments,
+    payrollPayments,
+    customers,
+    appUsers,
+    auditLogs,
+    calendarReservations,
+    currentUserId,
+    receivables,
+    businessSession,
+    updatedAt: new Date().toISOString(),
+  };
+}
 
   function openNewTicket() {
     const emptySeat = seats.find(
@@ -1391,7 +1476,7 @@ setPrice:
   return;
 }
 
-if (product.id === "castAdd") {
+if (product.id.startsWith("castAdd")) {
   addPlainProduct(product);
   return;
 }
@@ -3289,6 +3374,14 @@ function registerAdjustment(
     </button>
 
     <button
+  type="button"
+  onClick={() => setShowMemberManagement(true)}
+  className="min-h-12 rounded-xl bg-fuchsia-700 px-4 py-2 font-bold"
+>
+  会員管理
+</button>
+
+    <button
       type="button"
       onClick={() => {
         setShowPayroll(false);
@@ -4331,6 +4424,12 @@ function registerAdjustment(
           onClose={() => setShowCustomers(false)}
         />
       )}
+
+      {showMemberManagement && (
+  <MemberManagementModal
+    onClose={() => setShowMemberManagement(false)}
+  />
+)}
 
       {showStaff && (
         <StaffModal

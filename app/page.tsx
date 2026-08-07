@@ -594,6 +594,31 @@ const initialUsers: AppUser[] = [
 const storeMode: "moira" | "days" =
   process.env.NEXT_PUBLIC_STORE_MODE === "days" ? "days" : "moira";
 
+type DeviceMode = "unknown" | "pos" | "management" | "readonly";
+
+function detectDeviceMode(): DeviceMode {
+  if (typeof navigator === "undefined") {
+    return "unknown";
+  }
+
+  const userAgent = navigator.userAgent ?? "";
+  const platform = navigator.platform ?? "";
+
+  const isIPad =
+    /iPad/i.test(userAgent) ||
+    (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  if (isIPad) {
+    return "pos";
+  }
+
+  if (/Windows/i.test(userAgent)) {
+    return "management";
+  }
+
+  return "readonly";
+}
+
 function getOfflineStorageKey(isTestMode: boolean) {
   return `moira-pos-offline-state-v2-${storeMode}-${isTestMode ? "test" : "live"}`;
 }
@@ -641,6 +666,8 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [isTestMode, setIsTestMode] =
     useState(false);
   const [modeReady, setModeReady] = useState(false);
+  const [deviceMode, setDeviceMode] =
+    useState<DeviceMode>("unknown");
 
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [showOrder, setShowOrder] = useState(false);
@@ -687,8 +714,12 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] =
     useState("");
 
+  const isPosTerminal = deviceMode === "pos";
+  const isPcManagement = deviceMode === "management";
+
   useEffect(() => {
     setHasMounted(true);
+    setDeviceMode(detectDeviceMode());
   }, []);
 
   useEffect(() => {
@@ -1125,10 +1156,6 @@ if (Array.isArray(cloudData.businessReports)) {
   );
 }
 
-      if (Array.isArray(cloudData.staff)) {
-        setStaff(cloudData.staff as Staff[]);
-      }
-
       if (Array.isArray(cloudData.payrollAdjustments)) {
         setPayrollAdjustments(
           cloudData.payrollAdjustments as PayrollAdjustment[],
@@ -1208,60 +1235,84 @@ setTimeout(() => {
   isTestMode,
 ]);
 useEffect(() => {
- if (
-  syncingRef.current ||
-  !dataLoaded ||
-  !canPersist ||
-  isTestMode ||
-  !cloudSyncReady
-) 
-  return;
-
-if (saveStatus === "保存中") return;
-
-   const timer = window.setTimeout(async () => {
-  const snapshot = {
-    tickets,
-    closedTickets,
-    businessReports,
-    staff,
-    payrollAdjustments,
-    payrollPayments,
-    customers,
-    appUsers,
-    auditLogs,
-    calendarReservations,
-    currentUserId,
-    receivables,
-    businessSession,
-    updatedAt: new Date().toISOString(),
-  };
-
-  const persisted = saveOfflineSnapshot(
-    snapshot,
-    getOfflineStorageKey(isTestMode),
-  );
-
-  try {
-    await setDoc(
-      doc(db, "shared", "main"),
-      snapshot,
-      { merge: true },
-    );
-  } catch (error) {
-    console.error(
-      "Firestoreへの保存に失敗しました。",
-      error,
-    );
+  if (
+    syncingRef.current ||
+    !dataLoaded ||
+    !canPersist ||
+    isTestMode ||
+    !cloudSyncReady ||
+    deviceMode === "unknown"
+  ) {
+    return;
   }
 
-  setSaveStatus(
-    persisted ? "保存済み" : "保存失敗",
-  );
-}, 300);
+  const timer = window.setTimeout(async () => {
+    const localSnapshot = {
+      tickets,
+      closedTickets,
+      businessReports,
+      staff,
+      payrollAdjustments,
+      payrollPayments,
+      customers,
+      appUsers,
+      auditLogs,
+      calendarReservations,
+      currentUserId,
+      receivables,
+      businessSession,
+      updatedAt: new Date().toISOString(),
+    };
 
-    return () => window.clearTimeout(timer);
-  }, [
+    const persisted = saveOfflineSnapshot(
+      localSnapshot,
+      getOfflineStorageKey(isTestMode),
+    );
+
+    // shared/main は iPad POS だけが書き込みます。
+    // PC は onSnapshot で受信するだけにして、古いデータの上書きを防止します。
+    if (deviceMode === "pos") {
+      setSaveStatus("保存中");
+
+      const cloudSnapshot = {
+        tickets,
+        closedTickets,
+        businessReports,
+        payrollAdjustments,
+        payrollPayments,
+        customers,
+        appUsers,
+        auditLogs,
+        calendarReservations,
+        currentUserId,
+        receivables,
+        businessSession,
+        updatedAt: new Date().toISOString(),
+      };
+
+      try {
+        await setDoc(
+          doc(db, "shared", "main"),
+          cloudSnapshot,
+          { merge: true },
+        );
+      } catch (error) {
+        console.error(
+          "Firestoreへの保存に失敗しました。",
+          error,
+        );
+        setSaveStatus("保存失敗");
+        return;
+      }
+    }
+
+    setSaveStatus(
+      persisted ? "保存済み" : "保存失敗",
+    );
+  }, 300);
+
+  return () => window.clearTimeout(timer);
+}, [
   tickets,
   closedTickets,
   businessReports,
@@ -1279,7 +1330,7 @@ if (saveStatus === "保存中") return;
   canPersist,
   isTestMode,
   cloudSyncReady,
-  saveStatus,
+  deviceMode,
 ]);
 
   const occupiedSeatIds = useMemo(
@@ -1370,7 +1421,26 @@ function calculateAdditionalGuestPrice(
   };
 }
 
+  function requireIpadPos(action: string) {
+    if (deviceMode === "pos") {
+      return true;
+    }
+
+    const modeLabel =
+      deviceMode === "management"
+        ? "PC管理モード"
+        : "閲覧モード";
+
+    alert(
+      `${modeLabel}では「${action}」は操作できません。\n店舗iPadのPOSから操作してください。`,
+    );
+    return false;
+  }
+
   function openNewTicket() {
+
+    if (!requireIpadPos("新規伝票")) return;
+
     const emptySeat = seats.find(
       (seat) => !occupiedSeatIds.has(seat.id),
     );
@@ -1389,6 +1459,9 @@ function calculateAdditionalGuestPrice(
   }
 
   function createTicket() {
+
+    if (!requireIpadPos("伝票開始")) return;
+
     if (occupiedSeatIds.has(selectedSeatId)) {
       alert("選択した席はすでに使用中です。");
       return;
@@ -1431,6 +1504,9 @@ setPrice:
   }
 
   function addPlainProduct(product: Product) {
+
+    if (!requireIpadPos("注文追加")) return;
+
     if (!selectedTicket) return;
 
     setTickets((current) =>
@@ -1466,6 +1542,9 @@ setPrice:
   }
 
   function requestProduct(product: Product) {
+
+    if (!requireIpadPos("注文追加")) return;
+
     if (product.id === "companion") {
   setShowOrder(false);
   setPendingStaffSelection({
@@ -1511,6 +1590,9 @@ if (product.id.startsWith("castAdd")) {
   }
 
   function registerAssignedProduct(staffIds: string[]) {
+
+    if (!requireIpadPos("注文追加")) return;
+
     if (!selectedTicket || !pendingStaffSelection || staffIds.length === 0) {
       return;
     }
@@ -1594,6 +1676,9 @@ if (product.id.startsWith("castAdd")) {
     eventCups: Record<string, number>,
     representativeStaffId: string | null,
   ) {
+
+    if (!requireIpadPos("イベント注文")) return;
+
     if (!selectedTicket || !pendingEventProduct) return;
 
     const staffIds = Object.entries(eventCups)
@@ -1634,6 +1719,8 @@ if (product.id.startsWith("castAdd")) {
     setPendingEventProduct(null);
   }
 function addGuestToSelectedTicket(addCount = 1) {
+  if (!requireIpadPos("お客様追加")) return;
+
   if (!selectedTicket || addCount <= 0) {
     return;
   }
@@ -1700,6 +1787,9 @@ function addGuestToSelectedTicket(addCount = 1) {
   function saveReservationEntries(
     entries: ReservationEntry[],
   ) {
+
+    if (!requireIpadPos("伝票の予約登録")) return;
+
     if (!selectedTicket) {
       return;
     }
@@ -1719,6 +1809,9 @@ function addGuestToSelectedTicket(addCount = 1) {
   }
 
   function changeOrderQuantity(orderId: string, amount: number) {
+
+    if (!requireIpadPos("注文数変更")) return;
+
     if (!selectedTicket) return;
 
     setTickets((current) =>
@@ -1743,6 +1836,9 @@ function addGuestToSelectedTicket(addCount = 1) {
     type: PayrollAdjustmentType,
     quantity: number,
   ) {
+
+    if (!requireIpadPos("給与調整")) return;
+
     if (quantity <= 0) {
       return;
     }
@@ -1766,6 +1862,9 @@ function addGuestToSelectedTicket(addCount = 1) {
   }
 
   function deletePayrollAdjustment(adjustmentId: string) {
+
+    if (!requireIpadPos("給与調整の削除")) return;
+
     setPayrollAdjustments((current) =>
       current.filter((item) => item.id !== adjustmentId),
     );
@@ -1776,6 +1875,9 @@ function addGuestToSelectedTicket(addCount = 1) {
     amount: number,
     note: string,
   ) {
+
+    if (!requireIpadPos("給与支払い")) return;
+
     if (amount <= 0) {
       alert("支払額を入力してください。");
       return;
@@ -1796,6 +1898,9 @@ function addGuestToSelectedTicket(addCount = 1) {
   }
 
   function deletePayrollPayment(paymentId: string) {
+
+    if (!requireIpadPos("給与支払いの取消")) return;
+
     if (!window.confirm("この給与支払いを取り消しますか？")) {
       return;
     }
@@ -1812,6 +1917,9 @@ function addGuestToSelectedTicket(addCount = 1) {
   receivedAmount?: number,
   changeAmount?: number,
 ) {
+
+    if (!requireIpadPos("会計")) return;
+
 
     if (!selectedTicket) return;
 
@@ -1928,6 +2036,9 @@ const payment: Payment = {
   }
 
   function deleteLastPayment() {
+
+    if (!requireIpadPos("支払い取消")) return;
+
     if (!selectedTicket || selectedTicket.payments.length === 0) return;
     if (!window.confirm("直前の支払いを取り消しますか？")) return;
 
@@ -1966,6 +2077,9 @@ const payment: Payment = {
   }
 
   function moveSelectedTicket(newSeatId: number) {
+
+    if (!requireIpadPos("席移動")) return;
+
     if (!selectedTicket) {
       return;
     }
@@ -2000,6 +2114,9 @@ const payment: Payment = {
     amount: number,
     method: "現金" | "Squareカード" | "QR",
   ) {
+
+    if (!requireIpadPos("売掛入金")) return;
+
     if (amount <= 0) {
       alert("入金額を入力してください。");
       return;
@@ -2056,6 +2173,9 @@ const payment: Payment = {
     receivableId: string,
     collectionId: string,
   ) {
+
+    if (!requireIpadPos("売掛入金の取消")) return;
+
     if (!window.confirm("この入金を取り消しますか？")) {
       return;
     }
@@ -2078,6 +2198,9 @@ const payment: Payment = {
   function changeSelectedCourse(
   nextCourseId: string,
 ) {
+
+    if (!requireIpadPos("セット変更")) return;
+
   if (!selectedTicket) {
     return;
   }
@@ -2133,6 +2256,9 @@ const payment: Payment = {
 function changeExtensionCourse(
   nextCourseId: string,
 ) {
+
+  if (!requireIpadPos("延長セット変更")) return;
+
   if (!selectedTicket) {
     return;
   }
@@ -2160,6 +2286,8 @@ function registerAdjustment(
   reason: string,
   percent?: number,
 ) {
+  if (!requireIpadPos("サービス・割引")) return;
+
   if (!selectedTicket) {
     return;
   }
@@ -2203,6 +2331,8 @@ function registerAdjustment(
   setShowTicketEdit(false);
 }
   function addExtension(minutes: number, price: number) {
+    if (!requireIpadPos("延長")) return;
+
     if (!selectedTicket) {
       return;
     }
@@ -2253,6 +2383,9 @@ function registerAdjustment(
   }
 
   function finishTicket() {
+
+    if (!requireIpadPos("伝票終了")) return;
+
     if (!selectedTicket) return;
 
     const balance = calculateBalance(selectedTicket);
@@ -2351,6 +2484,9 @@ function registerAdjustment(
     },
     customerId?: string,
   ) {
+
+    if (!requireIpadPos("顧客の追加・編集")) return;
+
     if (customerId) {
       setCustomers((current) =>
         current.map((item) =>
@@ -2412,6 +2548,9 @@ function registerAdjustment(
   }
 
   function deleteCustomer(customerId: string) {
+
+    if (!requireIpadPos("顧客削除")) return;
+
     const isInUse = tickets.some(
       (ticket) => ticket.customerId === customerId,
     );
@@ -2467,6 +2606,9 @@ function registerAdjustment(
   }
 
   function saveAppUser(user: AppUser) {
+
+    if (!requireIpadPos("POSユーザー管理")) return;
+
     const exists = appUsers.some(
       (item) => item.id === user.id,
     );
@@ -2487,6 +2629,9 @@ function registerAdjustment(
   }
 
   function deleteAppUser(userId: string) {
+
+    if (!requireIpadPos("POSユーザー削除")) return;
+
     if (userId === "owner") {
       alert("初期ママユーザーは削除できません。");
       return;
@@ -2514,6 +2659,9 @@ function registerAdjustment(
   function saveCalendarReservation(
     reservation: CalendarReservation,
   ) {
+
+    if (!requireIpadPos("予約の追加・編集")) return;
+
     const exists = calendarReservations.some(
       (item) => item.id === reservation.id,
     );
@@ -2538,6 +2686,9 @@ function registerAdjustment(
   function deleteCalendarReservation(
     reservationId: string,
   ) {
+
+    if (!requireIpadPos("予約削除")) return;
+
     const target = calendarReservations.find(
       (item) => item.id === reservationId,
     );
@@ -2580,6 +2731,9 @@ function registerAdjustment(
   }
 
   async function resetCurrentData() {
+
+    if (!requireIpadPos("データ消去")) return;
+
     const modeLabel = isTestMode
       ? "テストデータ"
       : "本番データ";
@@ -2695,6 +2849,9 @@ function registerAdjustment(
   }
 
   function restoreBackup(rawBackup: unknown) {
+
+    if (!requireIpadPos("バックアップ復元")) return;
+
     if (
       typeof rawBackup !== "object" ||
       rawBackup === null
@@ -2842,6 +2999,9 @@ function registerAdjustment(
   }
 
   function startBusinessDay(openingAmount: number) {
+
+    if (!requireIpadPos("営業開始")) return;
+
     if (businessSession) {
       alert("すでに営業開始済みです。");
       return;
@@ -2867,6 +3027,9 @@ function registerAdjustment(
     amount: number,
     note: string,
   ) {
+
+    if (!requireIpadPos("ドロア入出金")) return;
+
     if (!businessSession || amount <= 0) return;
 
     const entry: DrawerEntry = {
@@ -2885,6 +3048,9 @@ function registerAdjustment(
   }
 
   function deleteDrawerEntry(entryId: string) {
+
+    if (!requireIpadPos("ドロア入出金の削除")) return;
+
     if (!window.confirm("このドロア記録を取り消しますか？")) return;
     setBusinessSession((current) =>
       current
@@ -2897,6 +3063,9 @@ function registerAdjustment(
   }
 
   function closeBusinessDay(closingAmount: number) {
+
+    if (!requireIpadPos("営業終了")) return;
+
     if (!businessSession) {
       alert("先に営業開始をしてください。");
       return;
@@ -2988,6 +3157,9 @@ function registerAdjustment(
   }
 
   function clockIn(staffId: string, businessTime: string) {
+
+    if (!requireIpadPos("出勤登録")) return;
+
     setStaff((current) =>
       current.map((person) =>
         person.id === staffId
@@ -3002,6 +3174,9 @@ function registerAdjustment(
   }
 
   function clockOut(staffId: string, businessTime: string) {
+
+    if (!requireIpadPos("退勤登録")) return;
+
     setStaff((current) =>
       current.map((person) =>
         person.id === staffId
@@ -3299,7 +3474,11 @@ function registerAdjustment(
       Moira POS Ver3
     </h1>
     <p className="hidden text-sm text-slate-400 sm:block">
-      iPad 11・13インチ横画面対応
+      {isPcManagement
+        ? "PC管理モード｜閲覧＋スタッフ設定・会員管理"
+        : isPosTerminal
+          ? "iPad POSモード｜店舗操作端末"
+          : "閲覧モード"}
     </p>
   </div>
 
@@ -3406,6 +3585,7 @@ function registerAdjustment(
     type="file"
     accept=".json,application/json"
     className="hidden"
+    disabled={!isPosTerminal}
     onChange={async (event) => {
       const file = event.target.files?.[0];
 
@@ -3448,7 +3628,12 @@ function registerAdjustment(
     <button
       type="button"
       onClick={resetCurrentData}
-      className="min-h-12 rounded-xl bg-red-950 px-3 py-2 text-sm font-bold text-red-200"
+      disabled={!isPosTerminal}
+      className={`min-h-12 rounded-xl px-3 py-2 text-sm font-bold ${
+        isPosTerminal
+          ? "bg-red-950 text-red-200"
+          : "cursor-not-allowed bg-slate-800 text-slate-500"
+      }`}
     >
       データ消去
     </button>
@@ -3518,6 +3703,20 @@ function registerAdjustment(
           </div>
         )}
 
+        {isPcManagement && !isTestMode && (
+          <div className="mb-3 rounded-2xl border-2 border-cyan-500 bg-cyan-950 p-3 text-sm font-bold text-cyan-100">
+            PC管理モード：履歴・売上・売掛・顧客・給与はリアルタイム閲覧できます。
+            スタッフの追加・設定と会員管理（イベント・クーポン等）はPCから操作できます。
+            伝票・注文・会計・営業・売掛入金・給与支払い・データ消去/復元は店舗iPadのみです。
+          </div>
+        )}
+
+        {deviceMode === "readonly" && (
+          <div className="mb-3 rounded-2xl border-2 border-slate-500 bg-slate-900 p-3 text-sm font-bold text-slate-200">
+            閲覧モード：この端末からのPOSデータ変更はできません。
+          </div>
+        )}
+
         <div className="grid gap-3 lg:h-[calc(100dvh-112px)] lg:grid-cols-[3fr_2fr]">
           <section className="flex min-h-0 flex-col rounded-2xl bg-slate-900 p-3">
             <div className="mb-3 flex items-center justify-between">
@@ -3531,7 +3730,12 @@ function registerAdjustment(
               <button
                 type="button"
                 onClick={openNewTicket}
-                className="min-h-12 rounded-xl bg-white px-4 py-2 font-bold text-slate-950"
+                disabled={!isPosTerminal}
+                className={`min-h-12 rounded-xl px-4 py-2 font-bold ${
+                  isPosTerminal
+                    ? "bg-white text-slate-950"
+                    : "cursor-not-allowed bg-slate-700 text-slate-400"
+                }`}
               >
                 ＋ 新規伝票
               </button>

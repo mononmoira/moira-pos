@@ -634,6 +634,12 @@ function getOfflineStorageKey(isTestMode: boolean) {
   return `moira-pos-offline-state-v2-${storeMode}-${isTestMode ? "test" : "live"}`;
 }
 
+function makeFirestoreSafe<T>(value: T): T {
+  // Firestore は undefined を含むオブジェクトを保存できないため、
+  // JSON 化できる POS データから undefined のプロパティを除去します。
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export default function Home() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [closedTickets, setClosedTickets] =
@@ -664,6 +670,7 @@ export default function Home() {
   const [canPersist, setCanPersist] = useState(false);
   const [cloudSyncReady, setCloudSyncReady] = useState(false);
   const syncingRef = useRef(false);
+  const lastCloudPayloadHashRef = useRef("");
 const [showInitialSync, setShowInitialSync] = useState(false);
 const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1280,46 +1287,73 @@ useEffect(() => {
       getOfflineStorageKey(isTestMode),
     );
 
-    // shared/main は iPad POS だけが書き込みます。
-    // PC は onSnapshot で受信するだけにして、古いデータの上書きを防止します。
-    if (deviceMode === "pos") {
-      setSaveStatus("保存中");
-
-      const cloudSnapshot = {
-        tickets,
-        closedTickets,
-        businessReports,
-        payrollAdjustments,
-        payrollPayments,
-        customers,
-        appUsers,
-        auditLogs,
-        calendarReservations,
-        currentUserId,
-        receivables,
-        businessSession,
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        await setDoc(
-          doc(db, "shared", "main"),
-          cloudSnapshot,
-          { merge: true },
-        );
-      } catch (error) {
-        console.error(
-          "Firestoreへの保存に失敗しました。",
-          error,
-        );
-        setSaveStatus("保存失敗");
-        return;
-      }
+    if (!persisted) {
+      console.warn("端末内バックアップの保存に失敗しました。");
     }
 
-    setSaveStatus(
-      persisted ? "保存済み" : "保存失敗",
-    );
+    // shared/main は店舗 iPad POS だけが書き込みます。
+    // PC は Firestore を受信するだけなので、iPad の伝票を上書きしません。
+    if (deviceMode !== "pos") {
+      setSaveStatus("保存済み");
+      return;
+    }
+
+    const cloudPayload = makeFirestoreSafe({
+      tickets,
+      closedTickets,
+      businessReports,
+      payrollAdjustments,
+      payrollPayments,
+      customers,
+      appUsers,
+      auditLogs,
+      calendarReservations,
+      currentUserId,
+      receivables,
+      businessSession,
+    });
+
+    const nextHash = JSON.stringify(cloudPayload);
+
+    // 内容が前回の保存と同じなら Firestore に再書き込みしません。
+    // updatedAt だけで保存表示が繰り返されるのを防ぎます。
+    if (nextHash === lastCloudPayloadHashRef.current) {
+      setSaveStatus("保存済み");
+      return;
+    }
+
+    setSaveStatus("保存中");
+
+    try {
+      await setDoc(
+        doc(db, "shared", "main"),
+        {
+          ...cloudPayload,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+
+      lastCloudPayloadHashRef.current = nextHash;
+      setSaveStatus("保存済み");
+
+      if (!persisted) {
+        setOfflineNotice(
+          "クラウド保存は完了しました。端末内バックアップだけ保存できませんでした。",
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+
+      console.error("Firestoreへの保存に失敗しました。", error);
+      setSaveStatus("保存失敗");
+      setOfflineNotice(`Firestore保存エラー: ${message}`);
+      setRuntimeErrors((current) => [
+        ...current,
+        `Firestore保存エラー: ${message}`,
+      ]);
+    }
   }, 300);
 
   return () => window.clearTimeout(timer);

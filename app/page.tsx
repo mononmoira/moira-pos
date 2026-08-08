@@ -60,6 +60,7 @@ import MemberManagementModal, {
   type MemberCouponApplication,
   type MemberTicketLink,
 } from "./components/MemberManagementModal";
+import MemberCampaignModal from "./components/MemberCampaignModal";
 import {
   clearOfflineSnapshot,
   getOnlineStatus,
@@ -702,6 +703,8 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [showCustomers, setShowCustomers] = useState(false);
   const [showMemberManagement, setShowMemberManagement] =
   useState(false);
+  const [showMemberCampaign, setShowMemberCampaign] =
+    useState(false);
   const [showReservationCalendar, setShowReservationCalendar] =
     useState(false);
   const [showExtension, setShowExtension] = useState(false);
@@ -3883,6 +3886,14 @@ function registerAdjustment(
 
     <button
       type="button"
+      onClick={() => setShowMemberCampaign(true)}
+      className="min-h-12 rounded-xl bg-pink-700 px-4 py-2 font-bold"
+    >
+      クーポン・イベント作成
+    </button>
+
+    <button
+      type="button"
       onClick={() => {
         setShowPayroll(false);
         setShowStaff(true);
@@ -4984,6 +4995,12 @@ function registerAdjustment(
           onLinkMember={linkMemberToTicket}
           onApplyCoupon={applyMemberCouponToTicket}
           onClose={() => setShowMemberManagement(false)}
+        />
+      )}
+
+      {showMemberCampaign && (
+        <MemberCampaignModal
+          onClose={() => setShowMemberCampaign(false)}
         />
       )}
 

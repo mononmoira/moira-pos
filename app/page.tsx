@@ -115,6 +115,7 @@ type Payment = {
 type PendingSquarePayment = {
   requestId: string;
   ticketId: string;
+  method: "Squareカード" | "QR";
   baseAmount: number;
   discountAmount: number;
   surchargeAmount: number;
@@ -2134,7 +2135,7 @@ function addGuestToSelectedTicket(addCount = 1) {
 
     const payment: Payment = {
       id: pending.requestId,
-      method: "Squareカード",
+      method: pending.method,
       amount: pending.chargedAmount,
       appliedAmount: pending.baseAmount,
       surchargeAmount:
@@ -2240,6 +2241,7 @@ function addGuestToSelectedTicket(addCount = 1) {
     ticket: Ticket,
     baseAmount: number,
     discountAmount: number,
+    method: "Squareカード" | "QR",
   ) {
     const applicationId =
       process.env
@@ -2263,6 +2265,7 @@ function addGuestToSelectedTicket(addCount = 1) {
     const pending: PendingSquarePayment = {
       requestId,
       ticketId: ticket.id,
+      method,
       baseAmount,
       discountAmount,
       surchargeAmount,
@@ -2296,11 +2299,19 @@ function addGuestToSelectedTicket(addCount = 1) {
       client_id: applicationId,
       version: "1.3",
       state: requestId,
-      notes: `Moira POS / ${seatName}`,
+      notes: `Moira POS / ${seatName} / ${
+        method === "QR"
+          ? "QRコード決済"
+          : "カード・電子マネー"
+      }`,
       options: {
-        supported_tender_types: [
-          "CREDIT_CARD",
-        ],
+        // 日本のSquare POS APIでは、
+        // CREDIT_CARD = クレジットカード＋電子マネー
+        // PAYPAY = QRコード決済全般
+        supported_tender_types:
+          method === "QR"
+            ? ["PAYPAY"]
+            : ["CREDIT_CARD"],
         clear_default_fees: true,
         auto_return: true,
         skip_receipt: false,
@@ -2360,19 +2371,22 @@ function addGuestToSelectedTicket(addCount = 1) {
       return;
     }
 
-    // Squareカードだけは、POS内で先に支払い済みにせず、
-    // Square POSアプリの決済成功コールバックを受けてから登録する。
-    if (method === "Squareカード") {
+    // カード・電子マネー・QRはすべてSquare POSで処理。
+    // Squareで成功するまではMoira POS側を支払い済みにしない。
+    if (
+      method === "Squareカード" ||
+      method === "QR"
+    ) {
       startSquarePayment(
         selectedTicket,
         baseAmount,
         discountAmount,
+        method,
       );
       return;
     }
 
-    const isCashless =
-      method === "QR";
+    const isCashless = false;
 
     const surchargeAmount =
       isCashless

@@ -623,6 +623,16 @@ function getOfflineStorageKey(isTestMode: boolean) {
   return `moira-pos-offline-state-v2-${storeMode}-${isTestMode ? "test" : "live"}`;
 }
 
+function sameJson(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function makeFirestoreSafe<T>(value: T): T {
+  // Firestore は undefined を含むオブジェクトを保存できないため、
+  // JSON 化できる POS データから undefined のプロパティを除去します。
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export default function Home() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [closedTickets, setClosedTickets] =
@@ -653,6 +663,7 @@ export default function Home() {
   const [canPersist, setCanPersist] = useState(false);
   const [cloudSyncReady, setCloudSyncReady] = useState(false);
   const syncingRef = useRef(false);
+  const lastCloudPayloadHashRef = useRef("");
 const [showInitialSync, setShowInitialSync] = useState(false);
 const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1118,81 +1129,102 @@ useEffect(() => {
 
   const unsubscribe = onSnapshot(
     sharedDocument,
-    
-      (documentSnapshot) => {
+    (documentSnapshot) => {
+      syncingRef.current = true;
 
-  syncingRef.current = true;
-
-  if (!documentSnapshot.exists()) {
-
-  setCloudSyncReady(true);
-  syncingRef.current = false;
-  return;
-}  
+      if (!documentSnapshot.exists()) {
+        setCloudSyncReady(true);
+        syncingRef.current = false;
+        return;
+      }
 
       const cloudData = documentSnapshot.data();
 
       if (Array.isArray(cloudData.tickets)) {
-  setTickets(prev =>
-    JSON.stringify(prev) === JSON.stringify(cloudData.tickets)
-      ? prev
-      : (cloudData.tickets as Ticket[])
-  );
-}
+        setTickets((current) =>
+          sameJson(current, cloudData.tickets)
+            ? current
+            : (cloudData.tickets as Ticket[]),
+        );
+      }
 
-if (Array.isArray(cloudData.closedTickets)) {
-  setClosedTickets(prev =>
-    JSON.stringify(prev) === JSON.stringify(cloudData.closedTickets)
-      ? prev
-      : (cloudData.closedTickets as ClosedTicket[])
-  );
-}
+      if (Array.isArray(cloudData.closedTickets)) {
+        setClosedTickets((current) =>
+          sameJson(current, cloudData.closedTickets)
+            ? current
+            : (cloudData.closedTickets as ClosedTicket[]),
+        );
+      }
 
-if (Array.isArray(cloudData.businessReports)) {
-  setBusinessReports(prev =>
-    JSON.stringify(prev) === JSON.stringify(cloudData.businessReports)
-      ? prev
-      : (cloudData.businessReports as BusinessReport[])
-  );
-}
+      if (Array.isArray(cloudData.businessReports)) {
+        setBusinessReports((current) =>
+          sameJson(current, cloudData.businessReports)
+            ? current
+            : (cloudData.businessReports as BusinessReport[]),
+        );
+      }
 
       if (Array.isArray(cloudData.payrollAdjustments)) {
-        setPayrollAdjustments(
-          cloudData.payrollAdjustments as PayrollAdjustment[],
+        setPayrollAdjustments((current) =>
+          sameJson(current, cloudData.payrollAdjustments)
+            ? current
+            : (cloudData.payrollAdjustments as PayrollAdjustment[]),
         );
       }
 
       if (Array.isArray(cloudData.payrollPayments)) {
-        setPayrollPayments(
-          cloudData.payrollPayments as PayrollPayment[],
+        setPayrollPayments((current) =>
+          sameJson(current, cloudData.payrollPayments)
+            ? current
+            : (cloudData.payrollPayments as PayrollPayment[]),
         );
       }
 
       if (Array.isArray(cloudData.customers)) {
-        setCustomers(cloudData.customers as Customer[]);
+        setCustomers((current) =>
+          sameJson(current, cloudData.customers)
+            ? current
+            : (cloudData.customers as Customer[]),
+        );
       }
 
       if (Array.isArray(cloudData.appUsers)) {
-        setAppUsers(cloudData.appUsers as AppUser[]);
+        setAppUsers((current) =>
+          sameJson(current, cloudData.appUsers)
+            ? current
+            : (cloudData.appUsers as AppUser[]),
+        );
       }
 
       if (Array.isArray(cloudData.auditLogs)) {
-        setAuditLogs(cloudData.auditLogs as AuditLog[]);
+        setAuditLogs((current) =>
+          sameJson(current, cloudData.auditLogs)
+            ? current
+            : (cloudData.auditLogs as AuditLog[]),
+        );
       }
 
       if (Array.isArray(cloudData.calendarReservations)) {
-        setCalendarReservations(
-          cloudData.calendarReservations as CalendarReservation[],
+        setCalendarReservations((current) =>
+          sameJson(current, cloudData.calendarReservations)
+            ? current
+            : (cloudData.calendarReservations as CalendarReservation[]),
         );
       }
 
       if (typeof cloudData.currentUserId === "string") {
-        setCurrentUserId(cloudData.currentUserId);
+        setCurrentUserId((current) =>
+          current === cloudData.currentUserId
+            ? current
+            : cloudData.currentUserId,
+        );
       }
 
       if (Array.isArray(cloudData.receivables)) {
-        setReceivables(
-          cloudData.receivables as Receivable[],
+        setReceivables((current) =>
+          sameJson(current, cloudData.receivables)
+            ? current
+            : (cloudData.receivables as Receivable[]),
         );
       }
 
@@ -1200,40 +1232,33 @@ if (Array.isArray(cloudData.businessReports)) {
         cloudData.businessSession === null ||
         typeof cloudData.businessSession === "object"
       ) {
-        setBusinessSession(
-          cloudData.businessSession as BusinessSession | null,
+        setBusinessSession((current) =>
+          sameJson(current, cloudData.businessSession)
+            ? current
+            : (cloudData.businessSession as BusinessSession | null),
         );
       }
 
-      if (
-  cloudData.businessSession === null ||
-  typeof cloudData.businessSession === "object"
-) {
-  setBusinessSession(
-    cloudData.businessSession as BusinessSession | null,
-  );
-}
+      setCloudSyncReady(true);
 
-setCloudSyncReady(true);
-
-setTimeout(() => {
-  syncingRef.current = false;
-}, 500);
+      window.setTimeout(() => {
+        syncingRef.current = false;
+      }, 250);
     },
     (error) => {
-      console.error(
-        "Firestoreからの受信に失敗しました。",
-        error,
+      console.error("Firestoreからの受信に失敗しました。", error);
+      syncingRef.current = false;
+      setOfflineNotice(
+        `Firestore受信エラー: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     },
   );
 
   return unsubscribe;
-}, [
-  dataLoaded,
-  canPersist,
-  isTestMode,
-]);
+}, [dataLoaded, canPersist, isTestMode]);
+
 useEffect(() => {
   if (
     syncingRef.current ||
@@ -1269,46 +1294,73 @@ useEffect(() => {
       getOfflineStorageKey(isTestMode),
     );
 
-    // shared/main は iPad POS だけが書き込みます。
-    // PC は onSnapshot で受信するだけにして、古いデータの上書きを防止します。
-    if (deviceMode === "pos") {
-      setSaveStatus("保存中");
-
-      const cloudSnapshot = {
-        tickets,
-        closedTickets,
-        businessReports,
-        payrollAdjustments,
-        payrollPayments,
-        customers,
-        appUsers,
-        auditLogs,
-        calendarReservations,
-        currentUserId,
-        receivables,
-        businessSession,
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        await setDoc(
-          doc(db, "shared", "main"),
-          cloudSnapshot,
-          { merge: true },
-        );
-      } catch (error) {
-        console.error(
-          "Firestoreへの保存に失敗しました。",
-          error,
-        );
-        setSaveStatus("保存失敗");
-        return;
-      }
+    if (!persisted) {
+      console.warn("端末内バックアップの保存に失敗しました。");
     }
 
-    setSaveStatus(
-      persisted ? "保存済み" : "保存失敗",
-    );
+    // shared/main は店舗 iPad POS だけが書き込みます。
+    // PC は Firestore を受信するだけなので、iPad の伝票を上書きしません。
+    if (deviceMode !== "pos") {
+      setSaveStatus("保存済み");
+      return;
+    }
+
+    const cloudPayload = makeFirestoreSafe({
+      tickets,
+      closedTickets,
+      businessReports,
+      payrollAdjustments,
+      payrollPayments,
+      customers,
+      appUsers,
+      auditLogs,
+      calendarReservations,
+      currentUserId,
+      receivables,
+      businessSession,
+    });
+
+    const nextHash = JSON.stringify(cloudPayload);
+
+    // データ内容が前回のクラウド保存と同じなら書き込みません。
+    // updatedAt だけで「保存中→保存済み」が繰り返されるのを防ぎます。
+    if (nextHash === lastCloudPayloadHashRef.current) {
+      setSaveStatus("保存済み");
+      return;
+    }
+
+    setSaveStatus("保存中");
+
+    try {
+      await setDoc(
+        doc(db, "shared", "main"),
+        {
+          ...cloudPayload,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+
+      lastCloudPayloadHashRef.current = nextHash;
+      setSaveStatus("保存済み");
+
+      if (!persisted) {
+        setOfflineNotice(
+          "クラウド保存は完了しました。端末内バックアップだけ保存できませんでした。",
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+
+      console.error("Firestoreへの保存に失敗しました。", error);
+      setSaveStatus("保存失敗");
+      setOfflineNotice(`Firestore保存エラー: ${message}`);
+      setRuntimeErrors((current) => [
+        ...current,
+        `Firestore保存エラー: ${message}`,
+      ]);
+    }
   }, 300);
 
   return () => window.clearTimeout(timer);

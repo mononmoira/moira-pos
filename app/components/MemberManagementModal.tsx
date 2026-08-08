@@ -55,28 +55,6 @@ function formatDate(value: unknown) {
 }
 
 
-function getFirebaseErrorInfo(error: unknown) {
-  const code =
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    typeof (error as { code?: unknown }).code === "string"
-      ? (error as { code: string }).code
-      : "unknown";
-
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "object" &&
-          error !== null &&
-          "message" in error &&
-          typeof (error as { message?: unknown }).message === "string"
-        ? (error as { message: string }).message
-        : String(error);
-
-  return { code, message };
-}
-
 type ScannerInstance = {
   stop: () => Promise<void>;
   clear: () => void;
@@ -131,8 +109,6 @@ export default function MemberManagementModal({
   const [scannerActive, setScannerActive] =
     useState(false);
 
-  const [manualUid, setManualUid] =
-    useState("");
 
   const [customPoint, setCustomPoint] =
     useState(100);
@@ -156,14 +132,6 @@ export default function MemberManagementModal({
   const [imageScanBusy, setImageScanBusy] =
     useState(false);
 
-  const [lastScannedUid, setLastScannedUid] =
-    useState("");
-
-  const [memberError, setMemberError] =
-    useState<string | null>(null);
-
-  const memberProjectId =
-    memberDb.app.options.projectId ?? "未設定";
 
   useEffect(() => {
     // 会員管理を開いた時点でQRライブラリを先読みして、
@@ -188,12 +156,8 @@ export default function MemberManagementModal({
   async function loadMember(uid: string) {
     const trimmedUid = uid.trim();
 
-    setLastScannedUid(trimmedUid);
-    setMemberError(null);
-
     if (!trimmedUid) {
-      setMemberError("QRから会員UIDを取得できませんでした。");
-      alert("会員UIDを確認してください。");
+      alert("QRコードから会員情報を読み取れませんでした。もう一度お試しください。");
       return;
     }
 
@@ -210,11 +174,7 @@ export default function MemberManagementModal({
         await getDoc(memberRef);
 
       if (!snapshot.exists()) {
-        const detail =
-          `Firestoreには接続できましたが、users/${trimmedUid} が見つかりません。`;
-
-        setMemberError(detail);
-        alert("会員情報が見つかりませんでした。");
+        alert("会員情報が見つかりませんでした。会員証を確認してください。");
         return;
       }
 
@@ -240,24 +200,12 @@ export default function MemberManagementModal({
           null,
       });
 
-      setMemberError(null);
       setScannerMessage("会員情報を取得しました。");
     } catch (error) {
       console.error("会員情報の取得に失敗しました。", error);
 
-      const { code, message } =
-        getFirebaseErrorInfo(error);
-
-      const detail =
-        `エラー: ${code}\n` +
-        `Project ID: ${memberProjectId}\n` +
-        `UID: ${trimmedUid}\n` +
-        `詳細: ${message}`;
-
-      setMemberError(detail);
-
       alert(
-        `会員情報の取得に失敗しました。\n\n${detail}`,
+        "会員情報を取得できませんでした。通信状況を確認して、もう一度お試しください。",
       );
     } finally {
       setLoading(false);
@@ -372,9 +320,6 @@ export default function MemberManagementModal({
 
           const uid = extractMemberUid(decodedText);
 
-          setLastScannedUid(uid);
-          setManualUid(uid);
-          setMemberError(null);
           setScannerMessage(
             "QRを読み取りました。会員情報を確認しています...",
           );
@@ -486,8 +431,6 @@ export default function MemberManagementModal({
       const uid =
         extractMemberUid(decodedText);
 
-      setLastScannedUid(uid);
-      setMemberError(null);
 
       try {
         scanner.clear();
@@ -769,62 +712,7 @@ export default function MemberManagementModal({
           </div>
         )}
 
-        {(lastScannedUid || memberError) && (
-          <div className="mt-4 rounded-2xl border border-amber-500/50 bg-amber-950/40 p-4 text-sm">
-            <p className="font-black text-amber-300">
-              QR / Firebase 診断
-            </p>
 
-            <div className="mt-2 space-y-1 break-all">
-              <p>
-                <span className="text-slate-400">Project ID:</span>{" "}
-                {memberProjectId}
-              </p>
-
-              {lastScannedUid && (
-                <p>
-                  <span className="text-slate-400">読み取ったUID:</span>{" "}
-                  {lastScannedUid}
-                </p>
-              )}
-
-              {memberError && (
-                <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-black/40 p-3 text-red-200">
-                  {memberError}
-                </pre>
-              )}
-            </div>
-          </div>
-        )}
-
-        <div className="mt-5 rounded-2xl bg-slate-950 p-4">
-          <p className="font-bold">
-            UID手動入力（テスト用）
-          </p>
-
-          <div className="mt-2 flex gap-2">
-            <input
-              value={manualUid}
-              onChange={(event) =>
-                setManualUid(
-                  event.target.value,
-                )
-              }
-              placeholder="会員UID"
-              className="min-w-0 flex-1 rounded-xl bg-slate-800 p-3"
-            />
-
-            <button
-              type="button"
-              onClick={() =>
-                loadMember(manualUid)
-              }
-              className="rounded-xl bg-violet-700 px-5 font-bold"
-            >
-              検索
-            </button>
-          </div>
-        </div>
 
         {loading && (
           <div className="mt-5 rounded-2xl bg-slate-800 p-5 text-center font-bold">

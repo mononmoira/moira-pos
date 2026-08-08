@@ -6,9 +6,13 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   increment,
+  query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
+  where,
 } from "firebase/firestore";
 
 import { memberDb } from "../lib/memberFirebase";
@@ -24,7 +28,41 @@ type Member = {
   lastVisitAt?: unknown;
 };
 
+export type MemberCouponApplication = {
+  userCouponId: string;
+  couponId?: string;
+  title: string;
+  discountAmount: number;
+};
+
+export type MemberTicketOption = {
+  id: string;
+  label: string;
+  total: number;
+  balance: number;
+  hasPayments: boolean;
+  hasCoupon: boolean;
+};
+
+type UserCoupon = {
+  id: string;
+  couponId?: string;
+  title: string;
+  description: string;
+  expireDate?: unknown;
+  used: boolean;
+  discountType: "amount" | "percent" | "unsupported";
+  discountValue: number;
+};
+
 type Props = {
+  tickets: MemberTicketOption[];
+  selectedTicketId: string | null;
+  canApplyCoupon: boolean;
+  onApplyCoupon: (
+    ticketId: string,
+    coupon: MemberCouponApplication,
+  ) => boolean;
   onClose: () => void;
 };
 
@@ -54,6 +92,146 @@ function formatDate(value: unknown) {
   return date.toLocaleDateString("ja-JP");
 }
 
+
+function couponDateToDate(value: unknown) {
+  if (!value) return null;
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate();
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // YYYY-MM-DD はその日の23:59:59まで有効として扱う。
+  const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnly) {
+    const [, year, month, day] = dateOnly;
+    return new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      23,
+      59,
+      59,
+      999,
+    );
+  }
+
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatCouponExpiry(value: unknown) {
+  const date = couponDateToDate(value);
+  return date ? date.toLocaleDateString("ja-JP") : "期限なし";
+}
+
+function resolveCouponDiscount(data: Record<string, unknown>) {
+  const amountCandidates = [
+    data.discountAmount,
+    data.amount,
+    data.discount,
+  ];
+
+  for (const candidate of amountCandidates) {
+    if (typeof candidate === "number" && candidate > 0) {
+      return {
+        discountType: "amount" as const,
+        discountValue: Math.floor(candidate),
+      };
+    }
+  }
+
+  const percentCandidates = [
+    data.discountPercent,
+    data.percent,
+  ];
+
+  for (const candidate of percentCandidates) {
+    if (typeof candidate === "number" && candidate > 0) {
+      return {
+        discountType: "percent" as const,
+        discountValue: candidate,
+      };
+    }
+  }
+
+  const text = `${String(data.title ?? "")} ${String(
+    data.description ?? "",
+  )}`;
+
+  const percentMatch = text.match(
+    /(\d{1,3}(?:\.\d+)?)\s*%\s*(?:OFF|オフ|引き|値引き)?/i,
+  );
+
+  if (percentMatch) {
+    return {
+      discountType: "percent" as const,
+      discountValue: Number(percentMatch[1]),
+    };
+  }
+
+  const yenOffMatch = text.match(
+    /(?:[¥￥]\s*)?([0-9][0-9,]*)\s*(?:円)?\s*(?:OFF|オフ|引き|値引き)/i,
+  );
+
+  if (yenOffMatch) {
+    return {
+      discountType: "amount" as const,
+      discountValue: Number(yenOffMatch[1].replace(/,/g, "")),
+    };
+  }
+
+  const yenSymbolMatch = text.match(/[¥￥]\s*([0-9][0-9,]*)/);
+
+  if (yenSymbolMatch) {
+    return {
+      discountType: "amount" as const,
+      discountValue: Number(yenSymbolMatch[1].replace(/,/g, "")),
+    };
+  }
+
+  return {
+    discountType: "unsupported" as const,
+    discountValue: 0,
+  };
+}
+
+function calculateCouponDiscount(
+  coupon: UserCoupon,
+  ticket: MemberTicketOption,
+) {
+  if (coupon.discountType === "amount") {
+    return Math.min(coupon.discountValue, ticket.balance);
+  }
+
+  if (coupon.discountType === "percent") {
+    return Math.min(
+      Math.ceil(ticket.balance * (coupon.discountValue / 100)),
+      ticket.balance,
+    );
+  }
+
+  return 0;
+}
+
+function couponDiscountLabel(coupon: UserCoupon) {
+  if (coupon.discountType === "amount") {
+    return `${coupon.discountValue.toLocaleString("ja-JP")}円OFF`;
+  }
+
+  if (coupon.discountType === "percent") {
+    return `${coupon.discountValue}%OFF`;
+  }
+
+  return "会計値引き対象外";
+}
 
 type ScannerInstance = {
   stop: () => Promise<void>;
@@ -99,6 +277,10 @@ function extractMemberUid(decodedText: string) {
 }
 
 export default function MemberManagementModal({
+  tickets,
+  selectedTicketId,
+  canApplyCoupon,
+  onApplyCoupon,
   onClose,
 }: Props) {
   const [member, setMember] =
@@ -132,6 +314,15 @@ export default function MemberManagementModal({
   const [imageScanBusy, setImageScanBusy] =
     useState(false);
 
+  const [memberCoupons, setMemberCoupons] =
+    useState<UserCoupon[]>([]);
+  const [couponLoading, setCouponLoading] =
+    useState(false);
+  const [couponTicketId, setCouponTicketId] =
+    useState("");
+  const [couponUseBusyId, setCouponUseBusyId] =
+    useState<string | null>(null);
+
 
   useEffect(() => {
     // 会員管理を開いた時点でQRライブラリを先読みして、
@@ -153,6 +344,211 @@ export default function MemberManagementModal({
     };
   }, []);
 
+  useEffect(() => {
+    const preferred =
+      (selectedTicketId &&
+        tickets.some((ticket) => ticket.id === selectedTicketId)
+        ? selectedTicketId
+        : "") ||
+      tickets.find(
+        (ticket) => !ticket.hasPayments && !ticket.hasCoupon,
+      )?.id ||
+      tickets[0]?.id ||
+      "";
+
+    setCouponTicketId((current) =>
+      current && tickets.some((ticket) => ticket.id === current)
+        ? current
+        : preferred,
+    );
+  }, [tickets, selectedTicketId]);
+
+  async function loadMemberCoupons(uid: string) {
+    setCouponLoading(true);
+
+    try {
+      // uidだけで取得し、used/期限は端末側で絞ることで
+      // Firestoreの複合インデックスを不要にする。
+      const snapshot = await getDocs(
+        query(
+          collection(memberDb, "userCoupons"),
+          where("uid", "==", uid),
+        ),
+      );
+
+      const now = new Date();
+
+      const nextCoupons = snapshot.docs
+        .map((couponDocument) => {
+          const data = couponDocument.data() as Record<string, unknown>;
+          const discount = resolveCouponDiscount(data);
+
+          return {
+            id: couponDocument.id,
+            couponId:
+              typeof data.couponId === "string"
+                ? data.couponId
+                : undefined,
+            title:
+              typeof data.title === "string" && data.title.trim()
+                ? data.title
+                : "会員クーポン",
+            description:
+              typeof data.description === "string"
+                ? data.description
+                : "",
+            expireDate: data.expireDate,
+            used: data.used === true,
+            ...discount,
+          } satisfies UserCoupon;
+        })
+        .filter((coupon) => {
+          if (coupon.used) return false;
+
+          const expireDate = couponDateToDate(coupon.expireDate);
+          return !expireDate || expireDate.getTime() >= now.getTime();
+        });
+
+      setMemberCoupons(nextCoupons);
+    } catch (error) {
+      console.error("会員クーポンの取得に失敗しました。", error);
+      setMemberCoupons([]);
+      alert(
+        "会員情報は取得できましたが、クーポン一覧の取得に失敗しました。",
+      );
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  async function useCoupon(coupon: UserCoupon) {
+    if (!member) return;
+
+    if (!canApplyCoupon) {
+      alert(
+        "会計値引きクーポンは店舗iPadのPOSから使用してください。",
+      );
+      return;
+    }
+
+    const ticket = tickets.find(
+      (item) => item.id === couponTicketId,
+    );
+
+    if (!ticket) {
+      alert("値引きを入れる伝票を選択してください。");
+      return;
+    }
+
+    if (ticket.hasPayments) {
+      alert(
+        "支払い登録後の伝票にはクーポンを適用できません。支払いを取り消してからクーポンを使用してください。",
+      );
+      return;
+    }
+
+    if (ticket.hasCoupon) {
+      alert("この伝票にはすでに会員クーポンが適用されています。");
+      return;
+    }
+
+    const discountAmount = calculateCouponDiscount(coupon, ticket);
+
+    if (discountAmount <= 0) {
+      alert(
+        "このクーポンは金額OFF・％OFFとして判定できないため、自動値引きできません。",
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${coupon.title}を使用します。\n\n` +
+        `${ticket.label}\n` +
+        `値引き：${discountAmount.toLocaleString("ja-JP")}円\n\n` +
+        "伝票へ値引きを入れて、クーポンを使用済みにしますか？",
+    );
+
+    if (!confirmed) return;
+
+    setCouponUseBusyId(coupon.id);
+
+    const couponRef = doc(
+      memberDb,
+      "userCoupons",
+      coupon.id,
+    );
+
+    try {
+      // 同じクーポンを2端末で同時に使用しないよう、
+      // 使用済みへの変更はトランザクションで確定する。
+      await runTransaction(memberDb, async (transaction) => {
+        const current = await transaction.get(couponRef);
+
+        if (!current.exists()) {
+          throw new Error("coupon-not-found");
+        }
+
+        if (current.data().used === true) {
+          throw new Error("coupon-already-used");
+        }
+
+        transaction.update(couponRef, {
+          used: true,
+          usedAt: serverTimestamp(),
+          usedTicketId: ticket.id,
+          usedAmount: discountAmount,
+          usedStore: "moira",
+        });
+      });
+
+      const applied = onApplyCoupon(ticket.id, {
+        userCouponId: coupon.id,
+        couponId: coupon.couponId,
+        title: coupon.title,
+        discountAmount,
+      });
+
+      if (!applied) {
+        // POS側で適用できなかった場合は、クーポンだけ消費されないよう戻す。
+        await updateDoc(couponRef, {
+          used: false,
+          usedAt: null,
+          usedTicketId: null,
+          usedAmount: 0,
+          usedStore: null,
+        });
+
+        throw new Error("pos-coupon-apply-failed");
+      }
+
+      setMemberCoupons((current) =>
+        current.filter((item) => item.id !== coupon.id),
+      );
+
+      alert(
+        `${coupon.title}を使用しました。\n${discountAmount.toLocaleString(
+          "ja-JP",
+        )}円を伝票から値引きしました。`,
+      );
+    } catch (error) {
+      console.error("クーポン使用に失敗しました。", error);
+
+      const message =
+        error instanceof Error ? error.message : "";
+
+      if (message === "coupon-already-used") {
+        alert("このクーポンはすでに使用済みです。");
+        await loadMemberCoupons(member.uid);
+      } else if (message !== "pos-coupon-apply-failed") {
+        alert(
+          "クーポン使用に失敗しました。通信状況を確認して、もう一度お試しください。",
+        );
+      }
+    } finally {
+      setCouponUseBusyId(null);
+    }
+  }
+
   async function loadMember(uid: string) {
     const trimmedUid = uid.trim();
 
@@ -162,6 +558,7 @@ export default function MemberManagementModal({
     }
 
     setLoading(true);
+    setMemberCoupons([]);
 
     try {
       const memberRef = doc(
@@ -201,6 +598,7 @@ export default function MemberManagementModal({
       });
 
       setScannerMessage("会員情報を取得しました。");
+      await loadMemberCoupons(trimmedUid);
     } catch (error) {
       console.error("会員情報の取得に失敗しました。", error);
 
@@ -800,6 +1198,146 @@ export default function MemberManagementModal({
                   </p>
                 </div>
               </div>
+            </section>
+
+            <section className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-950/30 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-black">
+                    🎟 利用可能クーポン
+                  </h3>
+                  <p className="mt-1 text-sm text-amber-100/70">
+                    金額OFF・％OFFクーポンは伝票へ自動で値引きします。
+                  </p>
+                </div>
+
+                <span className="rounded-full bg-amber-900 px-3 py-1 text-sm font-black text-amber-100">
+                  {memberCoupons.length}枚
+                </span>
+              </div>
+
+              {!canApplyCoupon && (
+                <div className="mt-3 rounded-xl bg-slate-900 p-3 text-sm font-bold text-slate-300">
+                  PC管理モードではクーポン確認のみできます。会計値引きは店舗iPadから使用してください。
+                </div>
+              )}
+
+              {tickets.length > 0 && (
+                <div className="mt-4">
+                  <label className="block text-sm font-bold text-amber-100">
+                    値引きを入れる伝票
+                  </label>
+                  <select
+                    value={couponTicketId}
+                    onChange={(event) =>
+                      setCouponTicketId(event.target.value)
+                    }
+                    disabled={!canApplyCoupon}
+                    className="mt-2 w-full rounded-xl bg-slate-900 p-3 font-bold disabled:opacity-60"
+                  >
+                    {tickets.map((ticket) => (
+                      <option key={ticket.id} value={ticket.id}>
+                        {ticket.label}・残り{ticket.balance.toLocaleString("ja-JP")}円
+                        {ticket.hasPayments ? "（支払登録あり）" : ""}
+                        {ticket.hasCoupon ? "（クーポン適用済）" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {tickets.length === 0 && (
+                <div className="mt-4 rounded-xl bg-slate-900 p-4 text-center text-slate-400">
+                  使用中の伝票がありません。
+                </div>
+              )}
+
+              {couponLoading ? (
+                <div className="mt-4 rounded-xl bg-slate-900 p-4 text-center font-bold">
+                  クーポンを確認中...
+                </div>
+              ) : memberCoupons.length === 0 ? (
+                <div className="mt-4 rounded-xl bg-slate-900 p-4 text-center text-slate-400">
+                  現在利用できるクーポンはありません。
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {memberCoupons.map((coupon) => {
+                    const targetTicket = tickets.find(
+                      (ticket) => ticket.id === couponTicketId,
+                    );
+                    const discountAmount = targetTicket
+                      ? calculateCouponDiscount(coupon, targetTicket)
+                      : 0;
+                    const disabled =
+                      !canApplyCoupon ||
+                      !targetTicket ||
+                      targetTicket.hasPayments ||
+                      targetTicket.hasCoupon ||
+                      coupon.discountType === "unsupported" ||
+                      discountAmount <= 0 ||
+                      couponUseBusyId !== null;
+
+                    return (
+                      <div
+                        key={coupon.id}
+                        className="rounded-2xl bg-slate-900 p-4"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-lg font-black text-amber-200">
+                              {coupon.title}
+                            </p>
+                            {coupon.description && (
+                              <p className="mt-1 whitespace-pre-wrap text-sm text-slate-300">
+                                {coupon.description}
+                              </p>
+                            )}
+                            <p className="mt-2 text-xs text-slate-400">
+                              有効期限：{formatCouponExpiry(coupon.expireDate)}
+                            </p>
+                          </div>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-sm font-black ${
+                              coupon.discountType === "unsupported"
+                                ? "bg-slate-700 text-slate-300"
+                                : "bg-emerald-900 text-emerald-200"
+                            }`}
+                          >
+                            {couponDiscountLabel(coupon)}
+                          </span>
+                        </div>
+
+                        {targetTicket &&
+                          coupon.discountType !== "unsupported" && (
+                            <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-950 p-3">
+                              <span className="text-sm text-slate-400">
+                                この伝票の値引き額
+                              </span>
+                              <strong className="text-xl text-emerald-300">
+                                -{discountAmount.toLocaleString("ja-JP")}円
+                              </strong>
+                            </div>
+                          )}
+
+                        <button
+                          type="button"
+                          onClick={() => void useCoupon(coupon)}
+                          disabled={disabled}
+                          className="mt-3 min-h-12 w-full rounded-xl bg-amber-600 px-4 font-black text-slate-950 disabled:bg-slate-700 disabled:text-slate-400"
+                        >
+                          {couponUseBusyId === coupon.id
+                            ? "使用処理中..."
+                            : coupon.discountType === "unsupported"
+                              ? "この特典は自動値引き対象外"
+                              : "このクーポンを伝票に適用"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
 
             <section className="mt-5 rounded-2xl bg-slate-950 p-4">

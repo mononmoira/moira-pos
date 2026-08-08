@@ -61,6 +61,7 @@ import MemberManagementModal, {
   type MemberTicketLink,
 } from "./components/MemberManagementModal";
 import MemberCampaignModal from "./components/MemberCampaignModal";
+import MemberListModal from "./components/MemberListModal";
 import {
   clearOfflineSnapshot,
   getOnlineStatus,
@@ -703,6 +704,8 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [showCustomers, setShowCustomers] = useState(false);
   const [showMemberManagement, setShowMemberManagement] =
   useState(false);
+  const [showMemberList, setShowMemberList] =
+    useState(false);
   const [showMemberCampaign, setShowMemberCampaign] =
     useState(false);
   const [showReservationCalendar, setShowReservationCalendar] =
@@ -3799,7 +3802,7 @@ function registerAdjustment(
     </h1>
     <p className="hidden text-sm text-slate-400 sm:block">
       {isPcManagement
-        ? "PC管理モード｜閲覧＋スタッフ設定・会員管理"
+        ? "PC管理モード｜閲覧＋スタッフ設定・会員一覧"
         : isPosTerminal
           ? "iPad POSモード｜店舗操作端末"
           : "閲覧モード"}
@@ -3877,12 +3880,12 @@ function registerAdjustment(
     </button>
 
     <button
-  type="button"
-  onClick={() => setShowMemberManagement(true)}
-  className="min-h-12 rounded-xl bg-fuchsia-700 px-4 py-2 font-bold"
->
-  会員管理
-</button>
+      type="button"
+      onClick={() => setShowMemberList(true)}
+      className="min-h-12 rounded-xl bg-fuchsia-700 px-4 py-2 font-bold"
+    >
+      会員一覧
+    </button>
 
     <button
       type="button"
@@ -4038,7 +4041,7 @@ function registerAdjustment(
         {isPcManagement && !isTestMode && (
           <div className="mb-3 rounded-2xl border-2 border-cyan-500 bg-cyan-950 p-3 text-sm font-bold text-cyan-100">
             PC管理モード：履歴・売上・売掛・顧客・給与はリアルタイム閲覧できます。
-            スタッフの追加・設定と会員管理（イベント・クーポン等）はPCから操作できます。
+            スタッフの追加・設定、会員一覧、クーポン・イベント作成はPCから操作できます。
             伝票・注文・会計・営業・売掛入金・給与支払い・データ消去/復元は店舗iPadのみです。
           </div>
         )}
@@ -4995,6 +4998,12 @@ function registerAdjustment(
           onLinkMember={linkMemberToTicket}
           onApplyCoupon={applyMemberCouponToTicket}
           onClose={() => setShowMemberManagement(false)}
+        />
+      )}
+
+      {showMemberList && (
+        <MemberListModal
+          onClose={() => setShowMemberList(false)}
         />
       )}
 

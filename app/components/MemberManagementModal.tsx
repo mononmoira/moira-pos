@@ -35,6 +35,12 @@ export type MemberCouponApplication = {
   discountAmount: number;
 };
 
+export type MemberTicketLink = {
+  uid: string;
+  memberNo?: string;
+  name?: string;
+};
+
 export type MemberTicketOption = {
   id: string;
   label: string;
@@ -42,6 +48,9 @@ export type MemberTicketOption = {
   balance: number;
   hasPayments: boolean;
   hasCoupon: boolean;
+  memberUid?: string;
+  memberName?: string;
+  pointEligibleAmount: number;
 };
 
 type UserCoupon = {
@@ -59,6 +68,10 @@ type Props = {
   tickets: MemberTicketOption[];
   selectedTicketId: string | null;
   canApplyCoupon: boolean;
+  onLinkMember: (
+    ticketId: string,
+    member: MemberTicketLink,
+  ) => boolean;
   onApplyCoupon: (
     ticketId: string,
     coupon: MemberCouponApplication,
@@ -280,6 +293,7 @@ export default function MemberManagementModal({
   tickets,
   selectedTicketId,
   canApplyCoupon,
+  onLinkMember,
   onApplyCoupon,
   onClose,
 }: Props) {
@@ -294,9 +308,6 @@ export default function MemberManagementModal({
 
   const [customPoint, setCustomPoint] =
     useState(100);
-
-  const [checkoutAmount, setCheckoutAmount] =
-    useState(0);
 
   const scannerRef =
     useRef<ScannerInstance | null>(null);
@@ -421,6 +432,32 @@ export default function MemberManagementModal({
     }
   }
 
+  function linkMemberToCurrentTicket() {
+    if (!member) return false;
+
+    if (!canApplyCoupon) {
+      alert(
+        "会員と伝票の連携は店舗iPadのPOSから行ってください。",
+      );
+      return false;
+    }
+
+    const ticket = tickets.find(
+      (item) => item.id === couponTicketId,
+    );
+
+    if (!ticket) {
+      alert("連携する伝票を選択してください。");
+      return false;
+    }
+
+    return onLinkMember(ticket.id, {
+      uid: member.uid,
+      memberNo: member.memberNo,
+      name: member.name,
+    });
+  }
+
   async function useCoupon(coupon: UserCoupon) {
     if (!member) return;
 
@@ -469,6 +506,16 @@ export default function MemberManagementModal({
     );
 
     if (!confirmed) return;
+
+    const linked = onLinkMember(ticket.id, {
+      uid: member.uid,
+      memberNo: member.memberNo,
+      name: member.name,
+    });
+
+    if (!linked) {
+      return;
+    }
 
     setCouponUseBusyId(coupon.id);
 
@@ -916,109 +963,6 @@ export default function MemberManagementModal({
     }
   }
 
-  async function addVisitAndCheckoutPoint() {
-    if (!member) return;
-
-    const salesPoint = Math.floor(
-      checkoutAmount / 100,
-    );
-
-    const totalPoint =
-      30 + salesPoint;
-
-    const confirmed =
-      window.confirm(
-        `来店ポイント 30pt\n` +
-          `会計ポイント ${salesPoint}pt\n\n` +
-          `合計 ${totalPoint}pt を付与しますか？`,
-      );
-
-    if (!confirmed) return;
-
-    setLoading(true);
-
-    try {
-      const memberRef = doc(
-        memberDb,
-        "users",
-        member.uid,
-      );
-
-      await updateDoc(memberRef, {
-        point: increment(totalPoint),
-        visitCount: increment(1),
-        lastVisitAt: serverTimestamp(),
-      });
-
-      await addDoc(
-        collection(memberDb, "pointLogs"),
-        {
-          uid: member.uid,
-          point: 30,
-          detail: "来店ポイント",
-          createdAt: serverTimestamp(),
-        },
-      );
-
-      if (salesPoint > 0) {
-        await addDoc(
-          collection(
-            memberDb,
-            "pointLogs",
-          ),
-          {
-            uid: member.uid,
-            point: salesPoint,
-            detail: `会計ポイント ${checkoutAmount.toLocaleString()}円`,
-            createdAt:
-              serverTimestamp(),
-          },
-        );
-      }
-
-      await addDoc(
-        collection(
-          memberDb,
-          "visitHistory",
-        ),
-        {
-          uid: member.uid,
-          amount: checkoutAmount,
-          point: totalPoint,
-          visitedAt:
-            serverTimestamp(),
-        },
-      );
-
-      setMember((current) =>
-        current
-          ? {
-              ...current,
-              point:
-                (current.point ?? 0) +
-                totalPoint,
-              visitCount:
-                (current.visitCount ?? 0) +
-                1,
-              lastVisitAt:
-                new Date().toISOString(),
-            }
-          : current,
-      );
-
-      alert(
-        `${totalPoint}ptを付与しました。`,
-      );
-    } catch (error) {
-      console.error(error);
-
-      alert(
-        "来店・会計ポイントの登録に失敗しました。",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
 
   return (
     <div className="fixed inset-0 z-[160] overflow-y-auto bg-black/90 p-3 sm:p-5">
@@ -1198,6 +1142,104 @@ export default function MemberManagementModal({
                   </p>
                 </div>
               </div>
+            </section>
+
+            <section className="mt-5 rounded-2xl border border-blue-500/30 bg-blue-950/40 p-4">
+              <h3 className="text-xl font-black">
+                💳 お会計連携
+              </h3>
+
+              <p className="mt-2 text-sm text-blue-200">
+                会員を伝票に連携すると、会計終了時に来店30pt＋会計100円につき1ptを自動付与します。
+              </p>
+
+              {tickets.length === 0 ? (
+                <div className="mt-4 rounded-xl bg-slate-900 p-4 text-center text-slate-400">
+                  使用中の伝票がありません。
+                </div>
+              ) : (
+                <>
+                  <label className="mt-4 block text-sm font-bold text-blue-100">
+                    連携する伝票
+                  </label>
+
+                  <select
+                    value={couponTicketId}
+                    onChange={(event) =>
+                      setCouponTicketId(event.target.value)
+                    }
+                    disabled={!canApplyCoupon}
+                    className="mt-2 w-full rounded-xl bg-slate-900 p-3 font-bold disabled:opacity-60"
+                  >
+                    {tickets.map((ticket) => (
+                      <option key={ticket.id} value={ticket.id}>
+                        {ticket.label}
+                        {ticket.memberUid
+                          ? `（${ticket.memberName ?? "会員"}様 連携済み）`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  {(() => {
+                    const targetTicket = tickets.find(
+                      (ticket) => ticket.id === couponTicketId,
+                    );
+
+                    if (!targetTicket) return null;
+
+                    const salesPoint = Math.floor(
+                      targetTicket.pointEligibleAmount / 100,
+                    );
+                    const totalPoint = 30 + salesPoint;
+                    const linkedToCurrentMember =
+                      targetTicket.memberUid === member.uid;
+
+                    return (
+                      <div className="mt-3 rounded-xl bg-slate-900 p-4">
+                        <div className="flex justify-between gap-3">
+                          <span className="text-slate-300">
+                            クーポン・割引後のポイント対象額
+                          </span>
+                          <strong>
+                            {targetTicket.pointEligibleAmount.toLocaleString("ja-JP")}円
+                          </strong>
+                        </div>
+
+                        <div className="mt-2 flex justify-between gap-3">
+                          <span className="text-slate-300">
+                            会計時の自動付与予定
+                          </span>
+                          <strong className="text-yellow-300">
+                            {totalPoint.toLocaleString("ja-JP")}pt
+                          </strong>
+                        </div>
+
+                        <p className="mt-2 text-xs text-slate-400">
+                          来店30pt＋会計{salesPoint.toLocaleString("ja-JP")}pt。キャッシュレス手数料はポイント対象外です。
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={linkMemberToCurrentTicket}
+                          disabled={!canApplyCoupon || linkedToCurrentMember}
+                          className="mt-3 min-h-12 w-full rounded-xl bg-blue-600 px-4 font-black disabled:bg-emerald-800 disabled:text-emerald-100"
+                        >
+                          {linkedToCurrentMember
+                            ? "✓ この会員と伝票は連携済み"
+                            : "この会員を伝票に連携"}
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+
+              {!canApplyCoupon && (
+                <div className="mt-3 rounded-xl bg-slate-900 p-3 text-sm font-bold text-slate-300">
+                  PC管理モードでは会員情報の確認のみできます。伝票連携・会計ポイント付与は店舗iPadから行います。
+                </div>
+              )}
             </section>
 
             <section className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-950/30 p-4">
@@ -1399,82 +1441,7 @@ export default function MemberManagementModal({
               </div>
             </section>
 
-            <section className="mt-5 rounded-2xl bg-blue-950 p-4">
-              <h3 className="text-xl font-black">
-                来店＋会計ポイント
-              </h3>
 
-              <p className="mt-2 text-sm text-blue-200">
-                来店30pt ＋
-                会計100円につき1pt
-              </p>
-
-              <label className="mt-4 block font-bold">
-                会計金額
-              </label>
-
-              <input
-                type="number"
-                min={0}
-                value={checkoutAmount}
-                onChange={(event) =>
-                  setCheckoutAmount(
-                    Math.max(
-                      0,
-                      Number(
-                        event.target.value,
-                      ),
-                    ),
-                  )
-                }
-                className="mt-2 w-full rounded-xl bg-slate-900 p-4 text-2xl font-black"
-              />
-
-              <div className="mt-3 rounded-xl bg-slate-900 p-4">
-                <div className="flex justify-between">
-                  <span>
-                    来店ポイント
-                  </span>
-                  <strong>30pt</strong>
-                </div>
-
-                <div className="mt-2 flex justify-between">
-                  <span>
-                    会計ポイント
-                  </span>
-                  <strong>
-                    {Math.floor(
-                      checkoutAmount /
-                        100,
-                    )}
-                    pt
-                  </strong>
-                </div>
-
-                <div className="mt-3 flex justify-between border-t border-slate-700 pt-3 text-xl">
-                  <span>合計</span>
-
-                  <strong className="text-yellow-300">
-                    {30 +
-                      Math.floor(
-                        checkoutAmount /
-                          100,
-                      )}
-                    pt
-                  </strong>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={
-                  addVisitAndCheckoutPoint
-                }
-                className="mt-4 min-h-14 w-full rounded-xl bg-blue-600 text-lg font-black"
-              >
-                来店・会計ポイントを登録
-              </button>
-            </section>
           </>
         )}
       </div>

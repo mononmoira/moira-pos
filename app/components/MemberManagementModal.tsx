@@ -55,6 +55,28 @@ function formatDate(value: unknown) {
 }
 
 
+function getFirebaseErrorInfo(error: unknown) {
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "unknown";
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" &&
+          error !== null &&
+          "message" in error &&
+          typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message
+        : String(error);
+
+  return { code, message };
+}
+
 type ScannerInstance = {
   stop: () => Promise<void>;
   clear: () => void;
@@ -98,50 +120,6 @@ function extractMemberUid(decodedText: string) {
   return raw;
 }
 
-function cameraScore(label: string) {
-  const value = label.toLowerCase();
-  let score = 0;
-
-  // iPad / iPhone の標準背面カメラを優先
-  if (
-    value.includes("back") ||
-    value.includes("rear") ||
-    value.includes("environment") ||
-    value.includes("背面")
-  ) {
-    score += 100;
-  }
-
-  // 超広角は近距離のQRでピントが合いにくいことがあるため避ける
-  if (
-    value.includes("ultra") ||
-    value.includes("0.5") ||
-    value.includes("超広角")
-  ) {
-    score -= 80;
-  }
-
-  if (
-    value === "back camera" ||
-    value === "rear camera" ||
-    value === "背面カメラ"
-  ) {
-    score += 40;
-  }
-
-  // 前面カメラは最優先候補から外す
-  if (
-    value.includes("front") ||
-    value.includes("facetime") ||
-    value.includes("user") ||
-    value.includes("前面")
-  ) {
-    score -= 150;
-  }
-
-  return score;
-}
-
 export default function MemberManagementModal({
   onClose,
 }: Props) {
@@ -174,7 +152,22 @@ export default function MemberManagementModal({
   const [imageScanBusy, setImageScanBusy] =
     useState(false);
 
+  const [lastScannedUid, setLastScannedUid] =
+    useState("");
+
+  const [memberError, setMemberError] =
+    useState<string | null>(null);
+
+  const memberProjectId =
+    memberDb.app.options.projectId ?? "未設定";
+
   useEffect(() => {
+    // 会員管理を開いた時点でQRライブラリを先読みして、
+    // 「QRを読み取る」を押した後の待ち時間を短くする。
+    void import("html5-qrcode").catch(() => {
+      // 起動時の先読み失敗は、実際の読取開始時に再試行する。
+    });
+
     return () => {
       const scanner = scannerRef.current;
 
@@ -191,7 +184,11 @@ export default function MemberManagementModal({
   async function loadMember(uid: string) {
     const trimmedUid = uid.trim();
 
+    setLastScannedUid(trimmedUid);
+    setMemberError(null);
+
     if (!trimmedUid) {
+      setMemberError("QRから会員UIDを取得できませんでした。");
       alert("会員UIDを確認してください。");
       return;
     }
@@ -209,9 +206,11 @@ export default function MemberManagementModal({
         await getDoc(memberRef);
 
       if (!snapshot.exists()) {
-        alert(
-          "会員情報が見つかりませんでした。",
-        );
+        const detail =
+          `Firestoreには接続できましたが、users/${trimmedUid} が見つかりません。`;
+
+        setMemberError(detail);
+        alert("会員情報が見つかりませんでした。");
         return;
       }
 
@@ -236,11 +235,25 @@ export default function MemberManagementModal({
           data.lastVisit ??
           null,
       });
+
+      setMemberError(null);
+      setScannerMessage("会員情報を取得しました。");
     } catch (error) {
-      console.error(error);
+      console.error("会員情報の取得に失敗しました。", error);
+
+      const { code, message } =
+        getFirebaseErrorInfo(error);
+
+      const detail =
+        `エラー: ${code}\n` +
+        `Project ID: ${memberProjectId}\n` +
+        `UID: ${trimmedUid}\n` +
+        `詳細: ${message}`;
+
+      setMemberError(detail);
 
       alert(
-        "会員情報の取得に失敗しました。",
+        `会員情報の取得に失敗しました。\n\n${detail}`,
       );
     } finally {
       setLoading(false);
@@ -288,44 +301,11 @@ export default function MemberManagementModal({
 
       scannerRef.current = scanner;
 
-      // iPadでは environment 指定だけだと超広角側が選ばれることがある。
-      // カメラ一覧を取得して、標準の背面カメラを優先して選ぶ。
-      let camera:
-        | string
-        | { facingMode: "environment" } = {
-        facingMode: "environment",
+      // iPadではカメラ一覧の列挙が数秒かかることがあるため、
+      // 一覧取得はせず背面カメラを直接指定して起動する。
+      const camera = {
+        facingMode: "environment" as const,
       };
-
-      try {
-        const cameras =
-          await Html5Qrcode.getCameras();
-
-        if (cameras.length > 0) {
-          const sorted = [...cameras].sort(
-            (a, b) =>
-              cameraScore(b.label ?? "") -
-              cameraScore(a.label ?? ""),
-          );
-
-          const bestCamera = sorted[0];
-
-          // ラベルが取れて背面カメラと判断できる場合だけ
-          // cameraIdを固定する。ラベルが空ならenvironment指定を維持。
-          if (
-            bestCamera &&
-            cameraScore(
-              bestCamera.label ?? "",
-            ) > 0
-          ) {
-            camera = bestCamera.id;
-          }
-        }
-      } catch (cameraListError) {
-        console.warn(
-          "カメラ一覧を取得できなかったため、背面カメラ指定で起動します。",
-          cameraListError,
-        );
-      }
 
       await (
         scanner as unknown as {
@@ -383,6 +363,9 @@ export default function MemberManagementModal({
         async (decodedText) => {
           const uid =
             extractMemberUid(decodedText);
+
+          setLastScannedUid(uid);
+          setMemberError(null);
 
           setScannerMessage(
             "QRを読み取りました。会員情報を確認しています...",
@@ -488,6 +471,9 @@ export default function MemberManagementModal({
 
       const uid =
         extractMemberUid(decodedText);
+
+      setLastScannedUid(uid);
+      setMemberError(null);
 
       try {
         scanner.clear();
@@ -766,6 +752,34 @@ export default function MemberManagementModal({
         {scannerMessage && (
           <div className="mt-3 rounded-xl bg-slate-800 px-4 py-3 text-sm font-bold text-slate-200">
             {scannerMessage}
+          </div>
+        )}
+
+        {(lastScannedUid || memberError) && (
+          <div className="mt-4 rounded-2xl border border-amber-500/50 bg-amber-950/40 p-4 text-sm">
+            <p className="font-black text-amber-300">
+              QR / Firebase 診断
+            </p>
+
+            <div className="mt-2 space-y-1 break-all">
+              <p>
+                <span className="text-slate-400">Project ID:</span>{" "}
+                {memberProjectId}
+              </p>
+
+              {lastScannedUid && (
+                <p>
+                  <span className="text-slate-400">読み取ったUID:</span>{" "}
+                  {lastScannedUid}
+                </p>
+              )}
+
+              {memberError && (
+                <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-black/40 p-3 text-red-200">
+                  {memberError}
+                </pre>
+              )}
+            </div>
           </div>
         )}
 

@@ -143,6 +143,10 @@ export default function MemberManagementModal({
   const scannerRef =
     useRef<ScannerInstance | null>(null);
 
+  // iPadでは同じQRを連続フレームで複数回検出することがあるため、
+  // 1回のスキャン処理を1度だけ実行する。
+  const scanHandledRef = useRef(false);
+
   const qrImageInputRef =
     useRef<HTMLInputElement | null>(null);
 
@@ -265,6 +269,7 @@ export default function MemberManagementModal({
       return;
     }
 
+    scanHandledRef.current = false;
     setScannerActive(true);
     setScannerMessage(
       "背面カメラを準備しています...",
@@ -361,27 +366,36 @@ export default function MemberManagementModal({
           },
         },
         async (decodedText) => {
-          const uid =
-            extractMemberUid(decodedText);
+          // 同じQRを連続検出しても1回だけ処理する
+          if (scanHandledRef.current) return;
+          scanHandledRef.current = true;
+
+          const uid = extractMemberUid(decodedText);
 
           setLastScannedUid(uid);
+          setManualUid(uid);
           setMemberError(null);
-
           setScannerMessage(
             "QRを読み取りました。会員情報を確認しています...",
           );
 
-          try {
-            await scanner.stop();
-          } catch {}
-
-          try {
-            scanner.clear();
-          } catch {}
-
-          scannerRef.current = null;
+          // 重要: iPadでは scanner.stop() が数秒待たされることがある。
+          // 会員検索を止め処理の完了待ちにしない。
           setScannerActive(false);
+          scannerRef.current = null;
 
+          void scanner
+            .stop()
+            .then(() => {
+              try {
+                scanner.clear();
+              } catch {}
+            })
+            .catch(() => {
+              // すでに停止済みなら問題なし
+            });
+
+          // QR読取直後にFirestore検索を開始する
           await loadMember(uid);
         },
         () => {

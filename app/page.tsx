@@ -104,8 +104,37 @@ type Payment = {
   changeAmount?: number;     // おつり
   discountAmount?: number;   // サービス割引
 
+  // Square POS連動
+  squareRequestId?: string;
+  squareTransactionId?: string;
+  squareClientTransactionId?: string;
+
   paidAt: string;
 };
+
+type PendingSquarePayment = {
+  requestId: string;
+  ticketId: string;
+  baseAmount: number;
+  discountAmount: number;
+  surchargeAmount: number;
+  chargedAmount: number;
+  createdAt: string;
+};
+
+type SquareCallbackResult = {
+  status?: string;
+  error_code?: string;
+  transaction_id?: string;
+  client_transaction_id?: string;
+  state?: string;
+};
+
+const SQUARE_PENDING_STORAGE_KEY =
+  "moira-pos-square-pending-payment-v1";
+
+const SQUARE_CALLBACK_URL =
+  "https://moira-pos.vercel.app/square-callback";
 
 export type ReservationEntry = {
   staffId: string;
@@ -673,6 +702,7 @@ export default function Home() {
   const [cloudSyncReady, setCloudSyncReady] = useState(false);
   const syncingRef = useRef(false);
   const lastCloudPayloadHashRef = useRef("");
+  const squareCallbackHandledRef = useRef(false);
 const [showInitialSync, setShowInitialSync] = useState(false);
 const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -745,6 +775,68 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
     setHasMounted(true);
     setDeviceMode(detectDeviceMode());
   }, []);
+
+  useEffect(() => {
+    if (
+      !hasMounted ||
+      !dataLoaded ||
+      squareCallbackHandledRef.current
+    ) {
+      return;
+    }
+
+    const params = new URLSearchParams(
+      window.location.search,
+    );
+
+    const squareData = params.get("square_data");
+    const squareError = params.get("square_error");
+
+    if (!squareData && !squareError) {
+      return;
+    }
+
+    squareCallbackHandledRef.current = true;
+
+    // URLに決済結果を残さない。
+    window.history.replaceState(
+      {},
+      "",
+      window.location.pathname,
+    );
+
+    if (squareError) {
+      sessionStorage.removeItem(
+        SQUARE_PENDING_STORAGE_KEY,
+      );
+
+      alert(
+        `Squareから決済結果を受け取れませんでした。\n${squareError}`,
+      );
+      return;
+    }
+
+    try {
+      const result = JSON.parse(
+        squareData ?? "{}",
+      ) as SquareCallbackResult;
+
+      handleSquarePaymentCallback(result);
+    } catch (error) {
+      console.error(
+        "Square決済結果の解析に失敗しました。",
+        error,
+      );
+
+      sessionStorage.removeItem(
+        SQUARE_PENDING_STORAGE_KEY,
+      );
+
+      alert(
+        "Squareの決済結果を読み取れませんでした。",
+      );
+    }
+  }, [hasMounted, dataLoaded]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1976,23 +2068,284 @@ function addGuestToSelectedTicket(addCount = 1) {
     );
   }
 
+  function handleSquarePaymentCallback(
+    result: SquareCallbackResult,
+  ) {
+    const pendingRaw =
+      sessionStorage.getItem(
+        SQUARE_PENDING_STORAGE_KEY,
+      );
+
+    if (!pendingRaw) {
+      alert(
+        "Square決済の待機情報が見つかりませんでした。伝票を確認してください。",
+      );
+      return;
+    }
+
+    let pending: PendingSquarePayment;
+
+    try {
+      pending = JSON.parse(
+        pendingRaw,
+      ) as PendingSquarePayment;
+    } catch {
+      sessionStorage.removeItem(
+        SQUARE_PENDING_STORAGE_KEY,
+      );
+
+      alert(
+        "Square決済の待機情報を読み取れませんでした。",
+      );
+      return;
+    }
+
+    if (
+      result.state &&
+      result.state !== pending.requestId
+    ) {
+      sessionStorage.removeItem(
+        SQUARE_PENDING_STORAGE_KEY,
+      );
+
+      alert(
+        "Square決済の照合に失敗しました。伝票は支払い済みにしていません。",
+      );
+      return;
+    }
+
+    if (
+      result.status !== "ok" ||
+      result.error_code
+    ) {
+      sessionStorage.removeItem(
+        SQUARE_PENDING_STORAGE_KEY,
+      );
+
+      const errorCode =
+        result.error_code ??
+        "payment_canceled";
+
+      alert(
+        `Square決済は完了していません。\\n${errorCode}`,
+      );
+      return;
+    }
+
+    const payment: Payment = {
+      id: pending.requestId,
+      method: "Squareカード",
+      amount: pending.chargedAmount,
+      appliedAmount: pending.baseAmount,
+      surchargeAmount:
+        pending.surchargeAmount,
+      discountAmount:
+        pending.discountAmount,
+      squareRequestId:
+        pending.requestId,
+      squareTransactionId:
+        result.transaction_id,
+      squareClientTransactionId:
+        result.client_transaction_id,
+      paidAt: new Date().toISOString(),
+    };
+
+    setTickets((current) =>
+      current.map((ticket) => {
+        if (
+          ticket.id !== pending.ticketId
+        ) {
+          return ticket;
+        }
+
+        const alreadyRegistered =
+          ticket.payments.some(
+            (item) =>
+              item.squareRequestId ===
+                pending.requestId ||
+              Boolean(
+                result.transaction_id &&
+                  item.squareTransactionId ===
+                    result.transaction_id,
+              ),
+          );
+
+        if (alreadyRegistered) {
+          return ticket;
+        }
+
+        const discountOrder =
+          pending.discountAmount > 0
+            ? {
+                id: createId(),
+                productId:
+                  `service-discount-${payment.id}`,
+                name: "サービス割引",
+                price:
+                  -pending.discountAmount,
+                quantity: 1,
+              }
+            : null;
+
+        const surchargeOrder =
+          pending.surchargeAmount > 0
+            ? {
+                id: createId(),
+                productId:
+                  `cashless-fee-${payment.id}`,
+                name:
+                  "キャッシュレス手数料10％",
+                price:
+                  pending.surchargeAmount,
+                quantity: 1,
+              }
+            : null;
+
+        return refreshTicketAmounts({
+          ...ticket,
+          orders: [
+            ...ticket.orders,
+            ...(discountOrder
+              ? [discountOrder]
+              : []),
+            ...(surchargeOrder
+              ? [surchargeOrder]
+              : []),
+          ],
+          payments: [
+            ...ticket.payments,
+            payment,
+          ],
+        });
+      }),
+    );
+
+    sessionStorage.removeItem(
+      SQUARE_PENDING_STORAGE_KEY,
+    );
+
+    setSelectedTicketId(
+      pending.ticketId,
+    );
+    setShowPayment(false);
+
+    alert(
+      `Square決済が完了しました。\\n${formatYen(
+        pending.chargedAmount,
+      )}`,
+    );
+  }
+
+  function startSquarePayment(
+    ticket: Ticket,
+    baseAmount: number,
+    discountAmount: number,
+  ) {
+    const applicationId =
+      process.env
+        .NEXT_PUBLIC_SQUARE_APPLICATION_ID;
+
+    if (!applicationId) {
+      alert(
+        "Square Application IDが設定されていません。Vercelの環境変数を確認してください。",
+      );
+      return;
+    }
+
+    const surchargeAmount =
+      Math.ceil(baseAmount * 0.1);
+
+    const chargedAmount =
+      baseAmount + surchargeAmount;
+
+    const requestId = createId();
+
+    const pending: PendingSquarePayment = {
+      requestId,
+      ticketId: ticket.id,
+      baseAmount,
+      discountAmount,
+      surchargeAmount,
+      chargedAmount,
+      createdAt:
+        new Date().toISOString(),
+    };
+
+    sessionStorage.setItem(
+      SQUARE_PENDING_STORAGE_KEY,
+      JSON.stringify(pending),
+    );
+
+    const seatName =
+      seats.find(
+        (seat) =>
+          seat.id === ticket.seatId,
+      )?.name ??
+      `席${ticket.seatId}`;
+
+    const data = {
+      amount_money: {
+        // JPYは最小単位が1円なので、そのまま円額を渡す。
+        amount: String(
+          Math.round(chargedAmount),
+        ),
+        currency_code: "JPY",
+      },
+      callback_url:
+        SQUARE_CALLBACK_URL,
+      client_id: applicationId,
+      version: "1.3",
+      state: requestId,
+      notes: `Moira POS / ${seatName}`,
+      options: {
+        supported_tender_types: [
+          "CREDIT_CARD",
+        ],
+        clear_default_fees: true,
+        auto_return: true,
+        skip_receipt: false,
+      },
+    };
+
+    const squareUrl =
+      "square-commerce-v1://payment/create?data=" +
+      encodeURIComponent(
+        JSON.stringify(data),
+      );
+
+    setShowPayment(false);
+
+    window.location.href =
+      squareUrl;
+  }
+
   function registerPayment(
-  method: PaymentMethod,
-  baseAmount: number,
-  discountAmount: number,
-  receivedAmount?: number,
-  changeAmount?: number,
-) {
+    method: PaymentMethod,
+    baseAmount: number,
+    discountAmount: number,
+    receivedAmount?: number,
+    changeAmount?: number,
+  ) {
+    if (!requireIpadPos("会計")) {
+      return;
+    }
 
-    if (!requireIpadPos("会計")) return;
+    if (!selectedTicket) {
+      return;
+    }
 
+    const currentBalance =
+      calculateBalance(
+        selectedTicket,
+      );
 
-    if (!selectedTicket) return;
-
-    const currentBalance = calculateBalance(selectedTicket);
-
-    if (baseAmount <= 0 || baseAmount > currentBalance) {
-      alert("支払額を確認してください。");
+    if (
+      baseAmount <= 0 ||
+      baseAmount > currentBalance
+    ) {
+      alert(
+        "支払額を確認してください。",
+      );
       return;
     }
 
@@ -2007,45 +2360,70 @@ function addGuestToSelectedTicket(addCount = 1) {
       return;
     }
 
-    const isCashless =
-      method === "Squareカード" || method === "QR";
+    // Squareカードだけは、POS内で先に支払い済みにせず、
+    // Square POSアプリの決済成功コールバックを受けてから登録する。
+    if (method === "Squareカード") {
+      startSquarePayment(
+        selectedTicket,
+        baseAmount,
+        discountAmount,
+      );
+      return;
+    }
 
-    const surchargeAmount = isCashless
-      ? Math.ceil(baseAmount * 0.1)
-      : 0;
+    const isCashless =
+      method === "QR";
+
+    const surchargeAmount =
+      isCashless
+        ? Math.ceil(
+            baseAmount * 0.1,
+          )
+        : 0;
 
     const chargedAmount =
-      baseAmount + surchargeAmount;
+      baseAmount +
+      surchargeAmount;
 
-     const discountOrder =
-  discountAmount > 0
-    ? {
-        id: createId(),
-        productId: `service-discount-${createId()}`,
-        name: "サービス割引",
-        price: -discountAmount,
-        quantity: 1,
-      }
-    : null;
+    const payment: Payment = {
+      id: createId(),
+      method,
+      amount: chargedAmount,
+      appliedAmount: baseAmount,
+      surchargeAmount,
+      receivedAmount:
+        method === "現金"
+          ? receivedAmount
+          : undefined,
+      changeAmount:
+        method === "現金"
+          ? changeAmount
+          : undefined,
+      discountAmount,
+      paidAt:
+        new Date().toISOString(),
+    };
 
-const payment: Payment = {
-  id: createId(),
-  method,
-  amount: chargedAmount,
-  appliedAmount: baseAmount,
-  surchargeAmount,
-  receivedAmount:
-    method === "現金" ? receivedAmount : undefined,
-  changeAmount:
-    method === "現金" ? changeAmount : undefined,
-  discountAmount,
-  paidAt: new Date().toISOString(),
-};
-
+    const discountOrder =
+      discountAmount > 0
+        ? {
+            id: createId(),
+            productId:
+              `service-discount-${payment.id}`,
+            name:
+              "サービス割引",
+            price:
+              -discountAmount,
+            quantity: 1,
+          }
+        : null;
 
     setTickets((current) =>
       current.map((ticket) => {
-        if (ticket.id !== selectedTicket.id) {
+        if (
+          ticket.id !==
+          selectedTicket.id
+        ) {
           return ticket;
         }
 
@@ -2053,9 +2431,12 @@ const payment: Payment = {
           surchargeAmount > 0
             ? {
                 id: createId(),
-                productId: `cashless-fee-${payment.id}`,
-                name: "キャッシュレス手数料10％",
-                price: surchargeAmount,
+                productId:
+                  `cashless-fee-${payment.id}`,
+                name:
+                  "キャッシュレス手数料10％",
+                price:
+                  surchargeAmount,
                 quantity: 1,
               }
             : null;
@@ -2063,16 +2444,18 @@ const payment: Payment = {
         return refreshTicketAmounts({
           ...ticket,
           orders: [
-  ...ticket.orders,
-  ...(discountOrder
-    ? [discountOrder]
-    : []),
-  ...(surchargeOrder
-    ? [surchargeOrder]
-    : []),
-],
-
-          payments: [...ticket.payments, payment],
+            ...ticket.orders,
+            ...(discountOrder
+              ? [discountOrder]
+              : []),
+            ...(surchargeOrder
+              ? [surchargeOrder]
+              : []),
+          ],
+          payments: [
+            ...ticket.payments,
+            payment,
+          ],
         });
       }),
     );
@@ -2084,18 +2467,24 @@ const payment: Payment = {
     ) {
       const receivable: Receivable = {
         id: createId(),
-        customerId: selectedTicket.customerId,
-        customerName: selectedTicket.customerName,
-        ticketId: selectedTicket.id,
+        customerId:
+          selectedTicket.customerId,
+        customerName:
+          selectedTicket.customerName,
+        ticketId:
+          selectedTicket.id,
         originalAmount: baseAmount,
-        createdAt: new Date().toISOString(),
+        createdAt:
+          new Date().toISOString(),
         collections: [],
       };
 
-      setReceivables((current) => [
-        ...current,
-        receivable,
-      ]);
+      setReceivables(
+        (current) => [
+          ...current,
+          receivable,
+        ],
+      );
     }
 
     setShowPayment(false);
@@ -2121,7 +2510,9 @@ const payment: Payment = {
               orders: ticket.orders.filter(
                 (order) =>
                   order.productId !==
-                  `cashless-fee-${lastPayment.id}`,
+                    `cashless-fee-${lastPayment.id}` &&
+                  order.productId !==
+                    `service-discount-${lastPayment.id}`,
               ),
               payments: ticket.payments.slice(0, -1),
             })

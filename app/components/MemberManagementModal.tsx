@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -54,6 +54,94 @@ function formatDate(value: unknown) {
   return date.toLocaleDateString("ja-JP");
 }
 
+
+type ScannerInstance = {
+  stop: () => Promise<void>;
+  clear: () => void;
+  scanFile: (
+    imageFile: File,
+    showImage?: boolean,
+  ) => Promise<string>;
+};
+
+function extractMemberUid(decodedText: string) {
+  const raw = decodedText.trim();
+
+  if (!raw) return "";
+
+  // 現在の会員証はUIDそのもの。
+  // 将来、JSON形式やURL形式に変更しても読めるようにしておく。
+  try {
+    const parsed = JSON.parse(raw) as {
+      uid?: unknown;
+    };
+
+    if (typeof parsed?.uid === "string") {
+      return parsed.uid.trim();
+    }
+  } catch {
+    // JSONでなくても問題なし
+  }
+
+  try {
+    const url = new URL(raw);
+    const uidFromQuery =
+      url.searchParams.get("uid");
+
+    if (uidFromQuery) {
+      return uidFromQuery.trim();
+    }
+  } catch {
+    // URLでなくても問題なし
+  }
+
+  return raw;
+}
+
+function cameraScore(label: string) {
+  const value = label.toLowerCase();
+  let score = 0;
+
+  // iPad / iPhone の標準背面カメラを優先
+  if (
+    value.includes("back") ||
+    value.includes("rear") ||
+    value.includes("environment") ||
+    value.includes("背面")
+  ) {
+    score += 100;
+  }
+
+  // 超広角は近距離のQRでピントが合いにくいことがあるため避ける
+  if (
+    value.includes("ultra") ||
+    value.includes("0.5") ||
+    value.includes("超広角")
+  ) {
+    score -= 80;
+  }
+
+  if (
+    value === "back camera" ||
+    value === "rear camera" ||
+    value === "背面カメラ"
+  ) {
+    score += 40;
+  }
+
+  // 前面カメラは最優先候補から外す
+  if (
+    value.includes("front") ||
+    value.includes("facetime") ||
+    value.includes("user") ||
+    value.includes("前面")
+  ) {
+    score -= 150;
+  }
+
+  return score;
+}
+
 export default function MemberManagementModal({
   onClose,
 }: Props) {
@@ -74,7 +162,31 @@ export default function MemberManagementModal({
   const [checkoutAmount, setCheckoutAmount] =
     useState(0);
 
-  const scannerRef = useRef<any>(null);
+  const scannerRef =
+    useRef<ScannerInstance | null>(null);
+
+  const qrImageInputRef =
+    useRef<HTMLInputElement | null>(null);
+
+  const [scannerMessage, setScannerMessage] =
+    useState("");
+
+  const [imageScanBusy, setImageScanBusy] =
+    useState(false);
+
+  useEffect(() => {
+    return () => {
+      const scanner = scannerRef.current;
+
+      if (!scanner) return;
+
+      void scanner.stop().catch(() => {
+        // すでに停止済みなら何もしない
+      });
+
+      scannerRef.current = null;
+    };
+  }, []);
 
   async function loadMember(uid: string) {
     const trimmedUid = uid.trim();
@@ -136,69 +248,191 @@ export default function MemberManagementModal({
   }
 
   async function startScanner() {
-    if (scannerActive) return;
+    if (scannerActive || imageScanBusy) {
+      return;
+    }
 
     setScannerActive(true);
+    setScannerMessage(
+      "背面カメラを準備しています...",
+    );
 
     try {
-      const { Html5Qrcode } =
-        await import("html5-qrcode");
+      const {
+        Html5Qrcode,
+        Html5QrcodeSupportedFormats,
+      } = await import("html5-qrcode");
 
-      const scanner =
-        new Html5Qrcode(
-          "member-qr-reader",
-        );
+      // 前回のスキャナーが残っていた場合は先に片付ける
+      if (scannerRef.current) {
+        try {
+          await scannerRef.current.stop();
+        } catch {}
+
+        try {
+          scannerRef.current.clear();
+        } catch {}
+
+        scannerRef.current = null;
+      }
+
+      const scanner = new Html5Qrcode(
+        "member-qr-reader",
+        {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+          ],
+          verbose: false,
+        },
+      ) as unknown as ScannerInstance;
 
       scannerRef.current = scanner;
 
-      await scanner.start(
+      // iPadでは environment 指定だけだと超広角側が選ばれることがある。
+      // カメラ一覧を取得して、標準の背面カメラを優先して選ぶ。
+      let camera:
+        | string
+        | { facingMode: "environment" } = {
+        facingMode: "environment",
+      };
+
+      try {
+        const cameras =
+          await Html5Qrcode.getCameras();
+
+        if (cameras.length > 0) {
+          const sorted = [...cameras].sort(
+            (a, b) =>
+              cameraScore(b.label ?? "") -
+              cameraScore(a.label ?? ""),
+          );
+
+          const bestCamera = sorted[0];
+
+          // ラベルが取れて背面カメラと判断できる場合だけ
+          // cameraIdを固定する。ラベルが空ならenvironment指定を維持。
+          if (
+            bestCamera &&
+            cameraScore(
+              bestCamera.label ?? "",
+            ) > 0
+          ) {
+            camera = bestCamera.id;
+          }
+        }
+      } catch (cameraListError) {
+        console.warn(
+          "カメラ一覧を取得できなかったため、背面カメラ指定で起動します。",
+          cameraListError,
+        );
+      }
+
+      await (
+        scanner as unknown as {
+          start: (
+            cameraIdOrConfig:
+              | string
+              | { facingMode: string },
+            config: {
+              fps: number;
+              qrbox: (
+                viewfinderWidth: number,
+                viewfinderHeight: number,
+              ) => {
+                width: number;
+                height: number;
+              };
+            },
+            onSuccess: (
+              decodedText: string,
+            ) => void,
+            onFailure?: (
+              errorMessage: string,
+            ) => void,
+          ) => Promise<void>;
+        }
+      ).start(
+        camera,
         {
-          facingMode: "environment",
-        },
-        {
-          fps: 10,
-          qrbox: {
-            width: 260,
-            height: 260,
+          fps: 12,
+          qrbox: (
+            viewfinderWidth,
+            viewfinderHeight,
+          ) => {
+            const shorterSide = Math.min(
+              viewfinderWidth,
+              viewfinderHeight,
+            );
+
+            // iPadでは260px固定より少し広い方が
+            // 画面上の会員QRを捉えやすい。
+            const size = Math.max(
+              220,
+              Math.min(
+                360,
+                Math.floor(shorterSide * 0.72),
+              ),
+            );
+
+            return {
+              width: size,
+              height: size,
+            };
           },
         },
         async (decodedText) => {
+          const uid =
+            extractMemberUid(decodedText);
+
+          setScannerMessage(
+            "QRを読み取りました。会員情報を確認しています...",
+          );
+
           try {
             await scanner.stop();
+          } catch {}
+
+          try {
+            scanner.clear();
           } catch {}
 
           scannerRef.current = null;
           setScannerActive(false);
 
-          let uid = decodedText;
-
-          // 将来JSON形式のQRにも対応
-          try {
-            const parsed =
-              JSON.parse(decodedText);
-
-            if (
-              parsed &&
-              typeof parsed.uid === "string"
-            ) {
-              uid = parsed.uid;
-            }
-          } catch {
-            // 会員証QRはUIDそのものなので
-            // JSONでなくても問題なし
-          }
-
           await loadMember(uid);
         },
-        () => {},
+        () => {
+          // フレームごとの読取失敗は正常なので何もしない
+        },
+      );
+
+      setScannerMessage(
+        "QRコードを枠の中央に入れて、少し離してかざしてください。",
       );
     } catch (error) {
       console.error(error);
 
+      const activeScanner =
+        scannerRef.current;
+
+      if (activeScanner) {
+        try {
+          await activeScanner.stop();
+        } catch {}
+
+        try {
+          activeScanner.clear();
+        } catch {}
+      }
+
+      scannerRef.current = null;
       setScannerActive(false);
+      setScannerMessage(
+        "カメラを起動できませんでした。",
+      );
 
       alert(
-        "カメラを起動できませんでした。",
+        "カメラを起動できませんでした。iPadのカメラ許可を確認するか、「QR画像から読み取る」をお試しください。",
       );
     }
   }
@@ -207,11 +441,86 @@ export default function MemberManagementModal({
     try {
       if (scannerRef.current) {
         await scannerRef.current.stop();
+
+        try {
+          scannerRef.current.clear();
+        } catch {}
       }
     } catch {}
 
     scannerRef.current = null;
     setScannerActive(false);
+    setScannerMessage("");
+  }
+
+  async function scanQrImage(
+    file: File,
+  ) {
+    if (!file) return;
+
+    await stopScanner();
+
+    setImageScanBusy(true);
+    setScannerMessage(
+      "QR画像を読み取っています...",
+    );
+
+    try {
+      const {
+        Html5Qrcode,
+        Html5QrcodeSupportedFormats,
+      } = await import("html5-qrcode");
+
+      const scanner = new Html5Qrcode(
+        "member-qr-reader",
+        {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+          ],
+          verbose: false,
+        },
+      ) as unknown as ScannerInstance;
+
+      scannerRef.current = scanner;
+
+      const decodedText =
+        await scanner.scanFile(file, true);
+
+      const uid =
+        extractMemberUid(decodedText);
+
+      try {
+        scanner.clear();
+      } catch {}
+
+      scannerRef.current = null;
+      setScannerMessage(
+        "QRを読み取りました。会員情報を確認しています...",
+      );
+
+      await loadMember(uid);
+    } catch (error) {
+      console.error(error);
+
+      try {
+        scannerRef.current?.clear();
+      } catch {}
+
+      scannerRef.current = null;
+      setScannerMessage(
+        "画像からQRコードを読み取れませんでした。",
+      );
+
+      alert(
+        "画像からQRコードを読み取れませんでした。QR全体が写っている画像を選んでください。",
+      );
+    } finally {
+      setImageScanBusy(false);
+
+      if (qrImageInputRef.current) {
+        qrImageInputRef.current.value = "";
+      }
+    }
   }
 
   async function addPoint(
@@ -400,13 +709,15 @@ export default function MemberManagementModal({
           <button
             type="button"
             onClick={startScanner}
-            disabled={scannerActive}
+            disabled={
+              scannerActive || imageScanBusy
+            }
             className="min-h-16 rounded-2xl bg-blue-700 p-4 text-xl font-black disabled:bg-slate-700"
           >
             📷 会員QRを読み取る
           </button>
 
-          {scannerActive && (
+          {scannerActive ? (
             <button
               type="button"
               onClick={stopScanner}
@@ -414,17 +725,49 @@ export default function MemberManagementModal({
             >
               カメラ停止
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                qrImageInputRef.current?.click()
+              }
+              disabled={imageScanBusy}
+              className="min-h-16 rounded-2xl bg-violet-700 p-4 text-xl font-black disabled:bg-slate-700"
+            >
+              🖼️ QR画像から読み取る
+            </button>
           )}
+
+          <input
+            ref={qrImageInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => {
+              const file =
+                event.target.files?.[0];
+
+              if (file) {
+                void scanQrImage(file);
+              }
+            }}
+          />
         </div>
 
         <div
           id="member-qr-reader"
           className={
-            scannerActive
-              ? "mt-4 overflow-hidden rounded-2xl bg-black"
+            scannerActive || imageScanBusy
+              ? "mt-4 min-h-[280px] overflow-hidden rounded-2xl bg-black"
               : "hidden"
           }
         />
+
+        {scannerMessage && (
+          <div className="mt-3 rounded-xl bg-slate-800 px-4 py-3 text-sm font-bold text-slate-200">
+            {scannerMessage}
+          </div>
+        )}
 
         <div className="mt-5 rounded-2xl bg-slate-950 p-4">
           <p className="font-bold">

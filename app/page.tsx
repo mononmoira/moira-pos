@@ -134,6 +134,9 @@ type SquareCallbackResult = {
 const SQUARE_PENDING_STORAGE_KEY =
   "moira-pos-square-pending-payment-v1";
 
+const SQUARE_PENDING_COLLECTION =
+  "squarePayments";
+
 const SQUARE_CALLBACK_URL =
   "https://moira-pos.vercel.app/square-callback";
 
@@ -463,6 +466,7 @@ const initialStaff: Staff[] = [
   { id: "nanami", name: "ななみ", role: "キャスト", hourlyWage: 2400, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "fuuka", name: "ふうか", role: "キャスト", hourlyWage: 2100, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "airi", name: "あいり", role: "キャスト", hourlyWage: 1900, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
+  { id: "rika", name: "りか", role: "キャスト", hourlyWage: 2000, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "soushi", name: "そうし", role: "ボーイ", hourlyWage: 1400, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "momo", name: "もも", role: "キャスト", hourlyWage: 1800, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
   { id: "panchi", name: "ぱんち", role: "ボーイ", hourlyWage: 1400, paymentCycle: "当日日払い", clockIn: null, clockOut: null },
@@ -822,7 +826,9 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
         squareData ?? "{}",
       ) as SquareCallbackResult;
 
-      handleSquarePaymentCallback(result);
+      void handleSquarePaymentCallback(
+        result,
+      );
     } catch (error) {
       console.error(
         "Square決済結果の解析に失敗しました。",
@@ -2069,175 +2075,556 @@ function addGuestToSelectedTicket(addCount = 1) {
     );
   }
 
-  function handleSquarePaymentCallback(
+  async function handleSquarePaymentCallback(
     result: SquareCallbackResult,
   ) {
-    const pendingRaw =
-      sessionStorage.getItem(
-        SQUARE_PENDING_STORAGE_KEY,
-      );
+    const requestId =
+      result.state?.trim();
 
-    if (!pendingRaw) {
+    if (!requestId) {
       alert(
-        "Square決済の待機情報が見つかりませんでした。伝票を確認してください。",
+        "Square決済の照合IDを受け取れませんでした。伝票は変更していません。",
       );
       return;
     }
 
-    let pending: PendingSquarePayment;
+    const pendingRef = doc(
+      db,
+      SQUARE_PENDING_COLLECTION,
+      requestId,
+    );
 
     try {
-      pending = JSON.parse(
-        pendingRaw,
-      ) as PendingSquarePayment;
-    } catch {
+      const pendingSnapshot =
+        await getDoc(pendingRef);
+
+      if (!pendingSnapshot.exists()) {
+        alert(
+          "Square決済の待機データが見つかりませんでした。決済自体はSquare履歴で確認してください。",
+        );
+        return;
+      }
+
+      const pending =
+        pendingSnapshot.data() as
+          PendingSquarePayment & {
+            status?: string;
+          };
+
+      if (
+        result.status !== "ok" ||
+        result.error_code
+      ) {
+        await setDoc(
+          pendingRef,
+          {
+            status: "canceled",
+            errorCode:
+              result.error_code ??
+              "payment_canceled",
+            callbackAt:
+              new Date().toISOString(),
+          },
+          { merge: true },
+        );
+
+        sessionStorage.removeItem(
+          SQUARE_PENDING_STORAGE_KEY,
+        );
+
+        alert(
+          `Square決済は完了していません。\\n${
+            result.error_code ??
+            "キャンセル"
+          }`,
+        );
+        return;
+      }
+
+      type SquareFinalizeResult = {
+        alreadyProcessed: boolean;
+        autoClosed: boolean;
+        paidTicket: Ticket | ClosedTicket | null;
+        closedTicket: ClosedTicket | null;
+        nextTickets: Ticket[];
+        nextClosedTickets: ClosedTicket[];
+        nextCustomers: Customer[];
+      };
+
+      const finalizeResult =
+        await runTransaction(
+          db,
+          async (
+            transaction,
+          ): Promise<SquareFinalizeResult> => {
+            const latestPending =
+              await transaction.get(
+                pendingRef,
+              );
+
+            const sharedRef = doc(
+              db,
+              "shared",
+              "main",
+            );
+
+            const sharedSnapshot =
+              await transaction.get(
+                sharedRef,
+              );
+
+            if (
+              !latestPending.exists()
+            ) {
+              throw new Error(
+                "square-pending-not-found",
+              );
+            }
+
+            if (
+              !sharedSnapshot.exists()
+            ) {
+              throw new Error(
+                "shared-main-not-found",
+              );
+            }
+
+            const pendingData =
+              latestPending.data() as
+                PendingSquarePayment & {
+                  status?: string;
+                };
+
+            const sharedData =
+              sharedSnapshot.data();
+
+            const currentTickets =
+              Array.isArray(
+                sharedData.tickets,
+              )
+                ? (sharedData.tickets as Ticket[])
+                : [];
+
+            const currentClosedTickets =
+              Array.isArray(
+                sharedData.closedTickets,
+              )
+                ? (sharedData.closedTickets as ClosedTicket[])
+                : [];
+
+            const currentCustomers =
+              Array.isArray(
+                sharedData.customers,
+              )
+                ? (sharedData.customers as Customer[])
+                : [];
+
+            const alreadyClosed =
+              currentClosedTickets.find(
+                (ticket) =>
+                  ticket.id ===
+                  pendingData.ticketId,
+              ) ?? null;
+
+            if (
+              pendingData.status ===
+                "processed" ||
+              alreadyClosed
+            ) {
+              transaction.set(
+                pendingRef,
+                {
+                  status: "processed",
+                  transactionId:
+                    result.transaction_id ??
+                    null,
+                  clientTransactionId:
+                    result.client_transaction_id ??
+                    null,
+                  processedAt:
+                    new Date().toISOString(),
+                  autoClosed:
+                    Boolean(
+                      alreadyClosed,
+                    ),
+                },
+                { merge: true },
+              );
+
+              return {
+                alreadyProcessed: true,
+                autoClosed:
+                  Boolean(alreadyClosed),
+                paidTicket:
+                  alreadyClosed,
+                closedTicket:
+                  alreadyClosed,
+                nextTickets:
+                  currentTickets,
+                nextClosedTickets:
+                  currentClosedTickets,
+                nextCustomers:
+                  currentCustomers,
+              };
+            }
+
+            const targetTicket =
+              currentTickets.find(
+                (ticket) =>
+                  ticket.id ===
+                  pendingData.ticketId,
+              );
+
+            if (!targetTicket) {
+              throw new Error(
+                "square-ticket-not-found",
+              );
+            }
+
+            const duplicatePayment =
+              targetTicket.payments.some(
+                (payment) =>
+                  payment.squareRequestId ===
+                    requestId ||
+                  Boolean(
+                    result.transaction_id &&
+                      payment.squareTransactionId ===
+                        result.transaction_id,
+                  ),
+              );
+
+            let paidTicket =
+              targetTicket;
+
+            if (!duplicatePayment) {
+              const payment: Payment = {
+                id: requestId,
+                method:
+                  pendingData.method,
+                amount:
+                  pendingData.chargedAmount,
+                appliedAmount:
+                  pendingData.baseAmount,
+                surchargeAmount:
+                  pendingData.surchargeAmount,
+                discountAmount:
+                  pendingData.discountAmount,
+                squareRequestId:
+                  requestId,
+                squareTransactionId:
+                  result.transaction_id,
+                squareClientTransactionId:
+                  result.client_transaction_id,
+                paidAt:
+                  new Date().toISOString(),
+              };
+
+              const discountOrder =
+                pendingData.discountAmount >
+                0
+                  ? {
+                      id: createId(),
+                      productId:
+                        `service-discount-${payment.id}`,
+                      name:
+                        "サービス割引",
+                      price:
+                        -pendingData.discountAmount,
+                      quantity: 1,
+                    }
+                  : null;
+
+              const surchargeOrder =
+                pendingData.surchargeAmount >
+                0
+                  ? {
+                      id: createId(),
+                      productId:
+                        `cashless-fee-${payment.id}`,
+                      name:
+                        "キャッシュレス手数料10％",
+                      price:
+                        pendingData.surchargeAmount,
+                      quantity: 1,
+                    }
+                  : null;
+
+              paidTicket =
+                refreshTicketAmounts({
+                  ...targetTicket,
+                  orders: [
+                    ...targetTicket.orders,
+                    ...(discountOrder
+                      ? [discountOrder]
+                      : []),
+                    ...(surchargeOrder
+                      ? [surchargeOrder]
+                      : []),
+                  ],
+                  payments: [
+                    ...targetTicket.payments,
+                    payment,
+                  ],
+                });
+            }
+
+            const remainingBalance =
+              calculateBalance(
+                paidTicket,
+              );
+
+            const autoClosed =
+              remainingBalance <= 0;
+
+            let closedTicket:
+              | ClosedTicket
+              | null = null;
+
+            let nextTickets =
+              currentTickets.map(
+                (ticket) =>
+                  ticket.id ===
+                  paidTicket.id
+                    ? paidTicket
+                    : ticket,
+              );
+
+            let nextClosedTickets =
+              currentClosedTickets;
+
+            let nextCustomers =
+              currentCustomers;
+
+            if (autoClosed) {
+              const closedAt =
+                new Date().toISOString();
+
+              closedTicket = {
+                ...paidTicket,
+                closedAt,
+              };
+
+              nextTickets =
+                currentTickets.filter(
+                  (ticket) =>
+                    ticket.id !==
+                    paidTicket.id,
+                );
+
+              nextClosedTickets = [
+                ...currentClosedTickets,
+                closedTicket,
+              ];
+
+              if (
+                paidTicket.customerId
+              ) {
+                nextCustomers =
+                  currentCustomers.map(
+                    (customer) => {
+                      if (
+                        customer.id !==
+                        paidTicket.customerId
+                      ) {
+                        return customer;
+                      }
+
+                      const alreadyVisited =
+                        customer.visits?.some(
+                          (visit) =>
+                            visit.id ===
+                            paidTicket.id,
+                        );
+
+                      if (
+                        alreadyVisited
+                      ) {
+                        return customer;
+                      }
+
+                      const visit: CustomerVisit =
+                        {
+                          id:
+                            paidTicket.id,
+                          visitedAt:
+                            closedAt,
+                          ticketTotal:
+                            paidTicket.total,
+                          guestCount:
+                            paidTicket.guests,
+                          courseName:
+                            paidTicket.courseName,
+                        };
+
+                      return {
+                        ...customer,
+                        lastVisitAt:
+                          closedAt,
+                        visitCount:
+                          customer.visitCount +
+                          1,
+                        visits: [
+                          ...customer.visits,
+                          visit,
+                        ],
+                      };
+                    },
+                  );
+              }
+            }
+
+            transaction.set(
+              sharedRef,
+              makeFirestoreSafe({
+                tickets:
+                  nextTickets,
+                closedTickets:
+                  nextClosedTickets,
+                customers:
+                  nextCustomers,
+                updatedAt:
+                  new Date().toISOString(),
+              }),
+              { merge: true },
+            );
+
+            transaction.set(
+              pendingRef,
+              {
+                status:
+                  "processed",
+                transactionId:
+                  result.transaction_id ??
+                  null,
+                clientTransactionId:
+                  result.client_transaction_id ??
+                  null,
+                processedAt:
+                  new Date().toISOString(),
+                autoClosed,
+              },
+              { merge: true },
+            );
+
+            return {
+              alreadyProcessed: false,
+              autoClosed,
+              paidTicket,
+              closedTicket,
+              nextTickets,
+              nextClosedTickets,
+              nextCustomers,
+            };
+          },
+        );
+
+      setTickets(
+        finalizeResult.nextTickets,
+      );
+      setClosedTickets(
+        finalizeResult.nextClosedTickets,
+      );
+      setCustomers(
+        finalizeResult.nextCustomers,
+      );
+
       sessionStorage.removeItem(
         SQUARE_PENDING_STORAGE_KEY,
       );
 
-      alert(
-        "Square決済の待機情報を読み取れませんでした。",
-      );
-      return;
-    }
+      if (
+        finalizeResult.autoClosed &&
+        finalizeResult.closedTicket
+      ) {
+        setSelectedTicketId(null);
 
-    if (
-      result.state &&
-      result.state !== pending.requestId
-    ) {
-      sessionStorage.removeItem(
-        SQUARE_PENDING_STORAGE_KEY,
-      );
-
-      alert(
-        "Square決済の照合に失敗しました。伝票は支払い済みにしていません。",
-      );
-      return;
-    }
-
-    if (
-      result.status !== "ok" ||
-      result.error_code
-    ) {
-      sessionStorage.removeItem(
-        SQUARE_PENDING_STORAGE_KEY,
-      );
-
-      const errorCode =
-        result.error_code ??
-        "payment_canceled";
-
-      alert(
-        `Square決済は完了していません。\\n${errorCode}`,
-      );
-      return;
-    }
-
-    const payment: Payment = {
-      id: pending.requestId,
-      method: pending.method,
-      amount: pending.chargedAmount,
-      appliedAmount: pending.baseAmount,
-      surchargeAmount:
-        pending.surchargeAmount,
-      discountAmount:
-        pending.discountAmount,
-      squareRequestId:
-        pending.requestId,
-      squareTransactionId:
-        result.transaction_id,
-      squareClientTransactionId:
-        result.client_transaction_id,
-      paidAt: new Date().toISOString(),
-    };
-
-    setTickets((current) =>
-      current.map((ticket) => {
         if (
-          ticket.id !== pending.ticketId
+          finalizeResult.closedTicket
+            .memberUid
         ) {
-          return ticket;
+          try {
+            const pointResult =
+              await creditMemberCheckoutPoints(
+                finalizeResult.closedTicket,
+              );
+
+            await setDoc(
+              pendingRef,
+              {
+                memberPointStatus:
+                  "credited",
+                memberPoint:
+                  pointResult.totalPoint,
+                memberPointUpdatedAt:
+                  new Date().toISOString(),
+              },
+              { merge: true },
+            );
+          } catch (error) {
+            console.error(
+              "Square会計後の会員ポイント付与に失敗しました。",
+              error,
+            );
+
+            await setDoc(
+              pendingRef,
+              {
+                memberPointStatus:
+                  "pending",
+                memberPointError:
+                  error instanceof Error
+                    ? error.message
+                    : String(error),
+                memberPointUpdatedAt:
+                  new Date().toISOString(),
+              },
+              { merge: true },
+            );
+
+            alert(
+              "Square決済と会計済み保存は完了しました。会員ポイントだけ付与できなかったため、あとで再確認してください。",
+            );
+            return;
+          }
         }
 
-        const alreadyRegistered =
-          ticket.payments.some(
-            (item) =>
-              item.squareRequestId ===
-                pending.requestId ||
-              Boolean(
-                result.transaction_id &&
-                  item.squareTransactionId ===
-                    result.transaction_id,
-              ),
-          );
+        alert(
+          `Square決済が完了しました。\\n${formatYen(
+            pending.chargedAmount,
+          )}\\n\\n伝票を会計済みにして履歴へ保存しました。`,
+        );
+        return;
+      }
 
-        if (alreadyRegistered) {
-          return ticket;
-        }
+      setSelectedTicketId(
+        pending.ticketId,
+      );
 
-        const discountOrder =
-          pending.discountAmount > 0
-            ? {
-                id: createId(),
-                productId:
-                  `service-discount-${payment.id}`,
-                name: "サービス割引",
-                price:
-                  -pending.discountAmount,
-                quantity: 1,
-              }
-            : null;
+      alert(
+        `Square決済が完了しました。\\n${formatYen(
+          pending.chargedAmount,
+        )}\\n\\n残額があるため伝票は営業中のままです。`,
+      );
+    } catch (error) {
+      console.error(
+        "Square決済結果のPOS反映に失敗しました。",
+        error,
+      );
 
-        const surchargeOrder =
-          pending.surchargeAmount > 0
-            ? {
-                id: createId(),
-                productId:
-                  `cashless-fee-${payment.id}`,
-                name:
-                  "キャッシュレス手数料10％",
-                price:
-                  pending.surchargeAmount,
-                quantity: 1,
-              }
-            : null;
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
 
-        return refreshTicketAmounts({
-          ...ticket,
-          orders: [
-            ...ticket.orders,
-            ...(discountOrder
-              ? [discountOrder]
-              : []),
-            ...(surchargeOrder
-              ? [surchargeOrder]
-              : []),
-          ],
-          payments: [
-            ...ticket.payments,
-            payment,
-          ],
-        });
-      }),
-    );
-
-    sessionStorage.removeItem(
-      SQUARE_PENDING_STORAGE_KEY,
-    );
-
-    setSelectedTicketId(
-      pending.ticketId,
-    );
-    setShowPayment(false);
-
-    alert(
-      `Square決済が完了しました。\\n${formatYen(
-        pending.chargedAmount,
-      )}`,
-    );
+      alert(
+        "Square決済結果をPOSへ反映できませんでした。\\n" +
+          "Square側の決済履歴は消えません。\\n\\n" +
+          `エラー: ${message}`,
+      );
+    }
   }
 
-  function startSquarePayment(
+  async function startSquarePayment(
     ticket: Ticket,
     baseAmount: number,
     discountAmount: number,
@@ -2258,7 +2645,8 @@ function addGuestToSelectedTicket(addCount = 1) {
       Math.ceil(baseAmount * 0.1);
 
     const chargedAmount =
-      baseAmount + surchargeAmount;
+      baseAmount +
+      surchargeAmount;
 
     const requestId = createId();
 
@@ -2274,6 +2662,40 @@ function addGuestToSelectedTicket(addCount = 1) {
         new Date().toISOString(),
     };
 
+    try {
+      // ブラウザ/PWA間でsessionStorageが共有されなくても
+      // Square決済結果を確実に照合できるよう、開始前にFirestoreへ保存。
+      await setDoc(
+        doc(
+          db,
+          SQUARE_PENDING_COLLECTION,
+          requestId,
+        ),
+        makeFirestoreSafe({
+          ...pending,
+          status: "pending",
+          seatId: ticket.seatId,
+          memberUid:
+            ticket.memberUid,
+          memberName:
+            ticket.memberName,
+          createdAt:
+            new Date().toISOString(),
+        }),
+      );
+    } catch (error) {
+      console.error(
+        "Square決済待機データの保存に失敗しました。",
+        error,
+      );
+
+      alert(
+        "Square決済の準備を保存できませんでした。通信状況を確認してもう一度お試しください。",
+      );
+      return;
+    }
+
+    // 同じブラウザへ戻った場合の予備保存。
     sessionStorage.setItem(
       SQUARE_PENDING_STORAGE_KEY,
       JSON.stringify(pending),
@@ -2288,7 +2710,6 @@ function addGuestToSelectedTicket(addCount = 1) {
 
     const data = {
       amount_money: {
-        // JPYは最小単位が1円なので、そのまま円額を渡す。
         amount: String(
           Math.round(chargedAmount),
         ),
@@ -2305,9 +2726,6 @@ function addGuestToSelectedTicket(addCount = 1) {
           : "カード・電子マネー"
       }`,
       options: {
-        // 日本のSquare POS APIでは、
-        // CREDIT_CARD = クレジットカード＋電子マネー
-        // PAYPAY = QRコード決済全般
         supported_tender_types:
           method === "QR"
             ? ["PAYPAY"]
@@ -2377,7 +2795,7 @@ function addGuestToSelectedTicket(addCount = 1) {
       method === "Squareカード" ||
       method === "QR"
     ) {
-      startSquarePayment(
+      void startSquarePayment(
         selectedTicket,
         baseAmount,
         discountAmount,
@@ -3867,12 +4285,24 @@ function registerAdjustment(
     alert("営業日報を確定しました。");
   }
 
-  function businessTimeToIso(businessTime: string) {
-    const [businessHour, minute] = businessTime.split(":").map(Number);
-    const now = new Date();
-    const baseDate = new Date(now);
+  function businessTimeToIso(
+    businessTime: string,
+    anchorIso?: string | null,
+  ) {
+    const [businessHour, minute] =
+      businessTime.split(":").map(Number);
 
-    if (now.getHours() < 12) {
+    // 既存の出勤記録がある修正では、その記録の営業日を基準にする。
+    // 例：8/8 21:00出勤を翌日にPCで25:00退勤へ修正しても、
+    //     8/9 01:00として正しく保存される。
+    const anchor =
+      anchorIso && !Number.isNaN(new Date(anchorIso).getTime())
+        ? new Date(anchorIso)
+        : new Date();
+
+    const baseDate = new Date(anchor);
+
+    if (anchor.getHours() < 12) {
       baseDate.setDate(baseDate.getDate() - 1);
     }
 
@@ -3880,44 +4310,133 @@ function registerAdjustment(
 
     if (businessHour >= 24) {
       baseDate.setDate(baseDate.getDate() + 1);
-      baseDate.setHours(businessHour - 24, minute, 0, 0);
+      baseDate.setHours(
+        businessHour - 24,
+        minute,
+        0,
+        0,
+      );
     } else {
-      baseDate.setHours(businessHour, minute, 0, 0);
+      baseDate.setHours(
+        businessHour,
+        minute,
+        0,
+        0,
+      );
     }
 
     return baseDate.toISOString();
   }
 
-  function clockIn(staffId: string, businessTime: string) {
+  function canEditAttendance(action: string) {
+    if (
+      deviceMode === "pos" ||
+      deviceMode === "management"
+    ) {
+      return true;
+    }
 
-    if (!requireIpadPos("出勤登録")) return;
+    alert(
+      `閲覧モードでは「${action}」は操作できません。`,
+    );
+    return false;
+  }
+
+  function clockIn(
+    staffId: string,
+    businessTime: string,
+  ) {
+    if (!canEditAttendance("出勤時刻の登録・修正")) {
+      return;
+    }
 
     setStaff((current) =>
-      current.map((person) =>
-        person.id === staffId
-          ? {
-              ...person,
-              clockIn: businessTimeToIso(businessTime),
-              clockOut: null,
-            }
-          : person,
-      ),
+      current.map((person) => {
+        if (person.id !== staffId) {
+          return person;
+        }
+
+        const nextClockIn =
+          businessTimeToIso(
+            businessTime,
+            person.clockIn,
+          );
+
+        if (deviceMode === "management") {
+          recordAudit(
+            "修正",
+            "勤怠",
+            `${person.name} 出勤 ${businessTime}`,
+          );
+        }
+
+        return {
+          ...person,
+          clockIn: nextClockIn,
+          // 出勤時刻を修正する時、すでに退勤記録があれば残す。
+          // 新規出勤の場合だけ退勤を未登録へ戻す。
+          clockOut:
+            person.clockIn === null
+              ? null
+              : person.clockOut,
+        };
+      }),
     );
   }
 
-  function clockOut(staffId: string, businessTime: string) {
-
-    if (!requireIpadPos("退勤登録")) return;
+  function clockOut(
+    staffId: string,
+    businessTime: string,
+  ) {
+    if (!canEditAttendance("退勤時刻の登録・修正")) {
+      return;
+    }
 
     setStaff((current) =>
-      current.map((person) =>
-        person.id === staffId
-          ? {
-              ...person,
-              clockOut: businessTimeToIso(businessTime),
-            }
-          : person,
-      ),
+      current.map((person) => {
+        if (person.id !== staffId) {
+          return person;
+        }
+
+        if (!person.clockIn) {
+          alert(
+            `${person.name}さんは出勤時刻が未登録です。先に出勤時刻を保存してください。`,
+          );
+          return person;
+        }
+
+        const nextClockOut =
+          businessTimeToIso(
+            businessTime,
+            person.clockIn,
+          );
+
+        const clockInMs =
+          new Date(person.clockIn).getTime();
+
+        const clockOutMs =
+          new Date(nextClockOut).getTime();
+
+        if (clockOutMs < clockInMs) {
+          alert(
+            "退勤時刻が出勤時刻より前になっています。時刻を確認してください。",
+          );
+          return person;
+        }
+
+        if (deviceMode === "management") {
+          recordAudit(
+            "修正",
+            "勤怠",
+            `${person.name} 退勤 ${businessTime}`,
+          );
+        }
+
+        return {
+          ...person,
+          clockOut: nextClockOut,
+        };
+      }),
     );
   }
 
@@ -4446,7 +4965,7 @@ function registerAdjustment(
         {isPcManagement && !isTestMode && (
           <div className="mb-3 rounded-2xl border-2 border-cyan-500 bg-cyan-950 p-3 text-sm font-bold text-cyan-100">
             PC管理モード：履歴・売上・売掛・顧客・給与はリアルタイム閲覧できます。
-            スタッフの追加・設定、会員一覧、クーポン・イベント作成はPCから操作できます。
+            スタッフの追加・設定・出退勤時間の修正、会員一覧、クーポン・イベント作成はPCから操作できます。
             伝票・注文・会計・営業・売掛入金・給与支払い・データ消去/復元は店舗iPadのみです。
           </div>
         )}

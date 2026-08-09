@@ -62,6 +62,7 @@ import MemberManagementModal, {
 } from "./components/MemberManagementModal";
 import MemberCampaignModal from "./components/MemberCampaignModal";
 import MemberListModal from "./components/MemberListModal";
+import StaffVisibilityModal from "./components/StaffVisibilityModal";
 import {
   clearOfflineSnapshot,
   getOnlineStatus,
@@ -683,6 +684,7 @@ export default function Home() {
   const [businessReports, setBusinessReports] =
     useState<BusinessReport[]>([]);
   const [staff, setStaff] = useState<Staff[]>(initialStaff);
+  const [hiddenStaffIds, setHiddenStaffIds] = useState<string[]>([]);
   const cloudStaffReadyRef = useRef(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [appUsers, setAppUsers] = useState<AppUser[]>(initialUsers);
@@ -728,6 +730,7 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
   const [showOrder, setShowOrder] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showStaff, setShowStaff] = useState(false);
+  const [showStaffVisibility, setShowStaffVisibility] = useState(false);
   const [showDailyReport, setShowDailyReport] =
     useState(false);
   const [showBusinessHistory, setShowBusinessHistory] =
@@ -1133,6 +1136,7 @@ return mergedStaff;
         try {
           await setDoc(staffDocument, {
             staff,
+            hiddenStaffIds,
             updatedAt:
               new Date().toISOString(),
           });
@@ -1155,6 +1159,24 @@ return mergedStaff;
       )
         ? (data.staff as Staff[])
         : [];
+
+      const cloudHiddenStaffIds =
+        Array.isArray(data.hiddenStaffIds)
+          ? data.hiddenStaffIds.filter(
+              (value): value is string =>
+                typeof value === "string",
+            )
+          : [];
+
+      setHiddenStaffIds((current) => {
+        const same =
+          JSON.stringify(current) ===
+          JSON.stringify(cloudHiddenStaffIds);
+
+        return same
+          ? current
+          : cloudHiddenStaffIds;
+      });
 
       if (cloudStaff.length > 0) {
         setStaff((current) => {
@@ -1208,6 +1230,7 @@ useEffect(() => {
           staffDocument,
           {
             staff,
+            hiddenStaffIds,
             updatedAt:
               new Date().toISOString(),
           },
@@ -1227,6 +1250,7 @@ useEffect(() => {
     window.clearTimeout(timer);
 }, [
   staff,
+  hiddenStaffIds,
   dataLoaded,
   canPersist,
   isTestMode,
@@ -1482,6 +1506,15 @@ useEffect(() => {
   cloudSyncReady,
   deviceMode,
 ]);
+
+  const selectableStaff = useMemo(
+    () =>
+      staff.filter(
+        (person) =>
+          !hiddenStaffIds.includes(person.id),
+      ),
+    [staff, hiddenStaffIds],
+  );
 
   const occupiedSeatIds = useMemo(
     () => new Set(tickets.map((ticket) => ticket.seatId)),
@@ -4342,6 +4375,50 @@ function registerAdjustment(
     return false;
   }
 
+  function setStaffSelectionVisibility(
+    staffId: string,
+    visible: boolean,
+  ) {
+    const person = staff.find(
+      (item) => item.id === staffId,
+    );
+
+    if (!person) {
+      return;
+    }
+
+    if (
+      !visible &&
+      person.clockIn &&
+      !person.clockOut
+    ) {
+      alert(
+        `${person.name}さんは現在出勤中です。退勤登録後に非表示にしてください。`,
+      );
+      return;
+    }
+
+    setHiddenStaffIds((current) => {
+      if (visible) {
+        return current.filter(
+          (id) => id !== staffId,
+        );
+      }
+
+      return current.includes(staffId)
+        ? current
+        : [...current, staffId];
+    });
+
+    recordAudit(
+      visible ? "復帰" : "非表示",
+      "スタッフ",
+      `${person.name}をスタッフ選択${
+        visible ? "に表示" : "から非表示"
+      }`,
+    );
+  }
+
   function clockIn(
     staffId: string,
     businessTime: string,
@@ -5435,7 +5512,7 @@ function registerAdjustment(
                 ? "飲んだスタッフを複数選択してください"
                 : "スタッフを1名選択してください"
           }
-          staff={staff}
+          staff={selectableStaff}
           multiple={pendingStaffSelection.mode === "multiple"}
           castOnly={pendingStaffSelection.purpose === "companion"}
           onRegister={registerAssignedProduct}
@@ -5446,7 +5523,7 @@ function registerAdjustment(
       {pendingEventProduct && (
         <EventStaffModal
           product={pendingEventProduct}
-          staff={staff}
+          staff={selectableStaff}
           onRegister={registerEventOrder}
           onClose={() => setPendingEventProduct(null)}
         />
@@ -5493,7 +5570,7 @@ function registerAdjustment(
 
       {showReservation && selectedTicket && (
         <ReservationModal
-          staff={staff}
+          staff={selectableStaff}
           initialEntries={
             selectedTicket.reservationEntries ?? []
           }
@@ -5502,12 +5579,13 @@ function registerAdjustment(
         />
       )}
 
-      {(showStaff || showPayroll) && (
+      {(showStaff || showPayroll || showStaffVisibility) && (
         <div className="fixed left-1/2 top-3 z-[100] flex -translate-x-1/2 gap-2 rounded-2xl border border-slate-600 bg-slate-950/95 p-2 shadow-2xl">
           <button
             type="button"
             onClick={() => {
               setShowPayroll(false);
+              setShowStaffVisibility(false);
               setShowStaff(true);
             }}
             className={`min-h-11 rounded-xl px-5 py-2 font-bold ${
@@ -5523,6 +5601,7 @@ function registerAdjustment(
             type="button"
             onClick={() => {
               setShowStaff(false);
+              setShowStaffVisibility(false);
               setShowPayroll(true);
             }}
             className={`min-h-11 rounded-xl px-5 py-2 font-bold ${
@@ -5532,6 +5611,22 @@ function registerAdjustment(
             }`}
           >
             給与
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowStaff(false);
+              setShowPayroll(false);
+              setShowStaffVisibility(true);
+            }}
+            className={`min-h-11 rounded-xl px-5 py-2 font-bold ${
+              showStaffVisibility
+                ? "bg-blue-600 text-white"
+                : "bg-slate-700 text-slate-200"
+            }`}
+          >
+            表示設定
           </button>
         </div>
       )}
@@ -5937,6 +6032,17 @@ function registerAdjustment(
         />
       )}
 
+      {showStaffVisibility && (
+        <StaffVisibilityModal
+          staff={staff}
+          hiddenStaffIds={hiddenStaffIds}
+          onSetVisible={setStaffSelectionVisibility}
+          onClose={() => {
+            setShowStaffVisibility(false);
+          }}
+        />
+      )}
+
       {showStaff && (
         <StaffModal
           staff={staff}
@@ -5947,6 +6053,7 @@ function registerAdjustment(
           onClose={() => {
             setShowStaff(false);
             setShowPayroll(false);
+            setShowStaffVisibility(false);
           }}
         />
       )}

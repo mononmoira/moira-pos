@@ -377,11 +377,10 @@ const courses: Course[] = [
   { id: "single", name: "シングル", minutes: 60, price: 3500 },
   { id: "oneToOne", name: "マンツーマン", minutes: 60, price: 4000 },
   { id: "bottleKeep", name: "ボトルキープ", minutes: 90, price: 3500 },
-  { id: "normal30", name: "30分セット", minutes: 30, price: 1500 },
-  { id: "cocktail30", name: "30分セット", minutes: 30, price: 1750 },
-  { id: "oneToOne30", name: "30分セット", minutes: 30, price: 2000 },
-
-  { id: "set45", name: "45分セット", minutes: 45, price: 1750 },
+  { id: "normal30", name: "通常ハーフ", minutes: 30, price: 1500 },
+  { id: "cocktail30", name: "カクテルシングルハーフ", minutes: 30, price: 1750 },
+  { id: "oneToOne30", name: "マンツーハーフ", minutes: 30, price: 2000 },
+  { id: "set45", name: "ボトルハーフ", minutes: 45, price: 1750 },
 ];
 
 const products: Product[] = [
@@ -394,6 +393,7 @@ const products: Product[] = [
   { id: "castMega", name: "メガ", category: "キャストドリンク", price: 4000 },
   { id: "castShot", name: "ショット", category: "キャストドリンク", price: 1500 },
   { id: "castAnejo", name: "アネホ", category: "キャストドリンク", price: 2500 },
+  { id: "castSpirytus", name: "スピリタス", category: "キャストドリンク", price: 2500 },
 
   { id: "kleiner", name: "クライナー", category: "ショット", price: 800 },
   { id: "tequila", name: "テキーラ", category: "ショット", price: 1000 },
@@ -439,6 +439,9 @@ const products: Product[] = [
   { id: "cocktail800", name: "カクテル800", category: "単品", price: 800 },
   { id: "softDrink", name: "ソフトドリンク", category: "単品", price: 400 },
   { id: "sake", name: "日本酒", category: "単品", price: 1500 },
+  { id: "spirytusSingle", name: "スピリタス", category: "単品", price: 1500 },
+  { id: "hakushuSingle", name: "白州シングル", category: "単品", price: 1000 },
+  { id: "manualSingle", name: "手入力", category: "単品", price: 0 },
   { id: "single150", name: "単品 150円", category: "単品", price: 150 },
   { id: "single200", name: "単品 200円", category: "単品", price: 200 },
   { id: "single250", name: "単品 250円", category: "単品", price: 250 },
@@ -958,17 +961,65 @@ const [initialSyncBusy, setInitialSyncBusy] = useState(false);
       }
     };
 
+    // iPad / Chrome / SafariでQRカメラを閉じたり、
+    // ページ移動・再読み込みした瞬間に出ることがある
+    // RenderedCameraImpl の onabort は、実際のPOS障害ではないため
+    // デバッグ用エラー表示から除外する。
+    const isIgnorableRuntimeError = (
+      value: unknown,
+    ) => {
+      const message = describeError(value);
+
+      return (
+        message.includes(
+          "RenderedCameraImpl video surface onabort() called",
+        ) ||
+        (
+          message.includes("RenderedCameraImpl") &&
+          message.includes("onabort")
+        )
+      );
+    };
+
     const handleError = (event: ErrorEvent) => {
+      const errorValue =
+        event.error ?? event.message;
+
+      if (
+        isIgnorableRuntimeError(
+          errorValue,
+        )
+      ) {
+        console.debug(
+          "QRカメラ終了時の既知のabortを無視しました。",
+          errorValue,
+        );
+        return;
+      }
+
       const location = event.filename
         ? `\n${event.filename}:${event.lineno}:${event.colno}`
         : "";
+
       setRuntimeErrors((current) => [
         ...current,
-        `${describeError(event.error ?? event.message)}${location}`,
+        `${describeError(errorValue)}${location}`,
       ]);
     };
 
     const handleRejection = (event: PromiseRejectionEvent) => {
+      if (
+        isIgnorableRuntimeError(
+          event.reason,
+        )
+      ) {
+        console.debug(
+          "QRカメラ終了時の既知のPromise abortを無視しました。",
+          event.reason,
+        );
+        return;
+      }
+
       setRuntimeErrors((current) => [
         ...current,
         `Unhandled Promise Rejection:\n${describeError(event.reason)}`,
@@ -1742,6 +1793,43 @@ setPrice:
   function requestProduct(product: Product) {
 
     if (!requireIpadPos("注文追加")) return;
+
+    if (product.id === "manualSingle") {
+      const enteredName = window.prompt(
+        "商品名を入力してください。\n空欄の場合は「手入力」で登録します。",
+        "",
+      );
+
+      if (enteredName === null) return;
+
+      const enteredPrice = window.prompt(
+        "金額を入力してください。（円）",
+        "",
+      );
+
+      if (enteredPrice === null) return;
+
+      const parsedPrice = Number(
+        enteredPrice.replace(/[,，\s円]/g, ""),
+      );
+
+      if (
+        !Number.isFinite(parsedPrice) ||
+        parsedPrice <= 0
+      ) {
+        alert("1円以上の金額を入力してください。");
+        return;
+      }
+
+      addPlainProduct({
+        id: `manual-single-${createId()}`,
+        name: enteredName.trim() || "手入力",
+        category: "単品",
+        price: Math.floor(parsedPrice),
+      });
+
+      return;
+    }
 
     if (product.id === "companion") {
   setShowOrder(false);

@@ -84,7 +84,7 @@ export default function OrderModal({
             >
               <p className="text-lg font-bold">{product.name}</p>
               <p className="mt-3 text-2xl font-black">
-                {formatYen(product.price)}
+                {product.id === "manualSingle" ? "金額を入力" : formatYen(product.price)}
               </p>
 
               {(category === "同伴" ||

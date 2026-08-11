@@ -48,6 +48,7 @@ const normalDrinkBack: Record<string, number> = {
   castShot: 500,
   castMega: 1500,
   castAnejo: 1000,
+  castSpirytus: 1000,
 };
 
 const companionDrinkBack: Record<string, number> = {
@@ -56,6 +57,7 @@ const companionDrinkBack: Record<string, number> = {
   castShot: 600,
   castMega: 1600,
   castAnejo: 1100,
+  castSpirytus: 1000,
 };
 
 function eventBackPerCup(productId: string) {

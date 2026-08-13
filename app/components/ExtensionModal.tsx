@@ -16,26 +16,35 @@ function formatYen(value: number) {
 }
 
 function getOptions(courseId: string): ExtensionOption[] {
-  if (courseId === "bottleKeep") {
-    return [
-      { minutes: 45, price: 1750 },
-      { minutes: 90, price: 3500 },
-    ];
-  }
+ if (
+  courseId === "normal" ||
+  courseId === "normal30"
+) {
+  return [
+    { minutes: 30, price: 1500 },
+    { minutes: 60, price: 3000 },
+  ];
+}
 
-  if (courseId === "normal") {
-    return [
-      { minutes: 30, price: 1500 },
-      { minutes: 60, price: 3000 },
-    ];
-  }
+if (
+  courseId === "oneToOne" ||
+  courseId === "oneToOne30"
+) {
+  return [
+    { minutes: 30, price: 2000 },
+    { minutes: 60, price: 4000 },
+  ];
+}
 
-  if (courseId === "oneToOne") {
-    return [
-      { minutes: 30, price: 2000 },
-      { minutes: 60, price: 4000 },
-    ];
-  }
+if (
+  courseId === "bottleKeep" ||
+  courseId === "set45"
+) {
+  return [
+    { minutes: 45, price: 1750 },
+    { minutes: 90, price: 3500 },
+  ];
+} 
 
   return [
     { minutes: 30, price: 1750 },

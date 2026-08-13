@@ -3086,6 +3086,36 @@ function addGuestToSelectedTicket(addCount = 1) {
     }
   }
 
+function deleteSelectedTicket() {
+  if (!selectedTicket) return;
+
+  if (selectedTicket.payments.length > 0) {
+    alert(
+      "支払い履歴がある伝票は削除できません。\n先に支払いを取り消してください。",
+    );
+    return;
+  }
+
+  const seatName =
+    seats.find(
+      (seat) => seat.id === selectedTicket.seatId,
+    )?.name ?? "選択中の席";
+
+  const ok = window.confirm(
+    `${seatName}の伝票を削除しますか？\n\n※削除後は元に戻せません。`,
+  );
+
+  if (!ok) return;
+
+  setTickets((current) =>
+    current.filter(
+      (ticket) => ticket.id !== selectedTicket.id,
+    ),
+  );
+
+  setSelectedTicketId(null);
+}
+
   function moveSelectedTicket(newSeatId: number) {
 
     if (!requireIpadPos("席移動")) return;
@@ -5409,6 +5439,14 @@ function registerAdjustment(
                 >
                   会計済み・伝票終了
                 </button>
+
+                <button
+  type="button"
+  onClick={deleteSelectedTicket}
+  className="mt-2 min-h-12 w-full rounded-xl border border-red-700 bg-red-950 p-3 font-bold text-red-200"
+>
+  🗑 この伝票を削除
+</button>
               </div>
             )}
           </aside>

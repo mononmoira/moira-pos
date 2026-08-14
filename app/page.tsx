@@ -69,6 +69,12 @@ import {
   loadOfflineSnapshot,
   saveOfflineSnapshot,
 } from "./lib/offlineStorage";
+import {
+  calculatePayrollSnapshotRows,
+} from "./lib/payroll";
+import type {
+  PayrollSnapshotRow,
+} from "./lib/payroll";
 
 type Course = {
   id: string;
@@ -336,6 +342,7 @@ export type BusinessReport = {
     単品: number;
   };
   ticketIds: string[];
+  payrollRows?: PayrollSnapshotRow[];
   drawerOpeningAmount?: number;
   drawerCashSales?: number;
   drawerReceivableCollections?: number;
@@ -4395,6 +4402,15 @@ function registerAdjustment(
 
     const report: BusinessReport = {
       ...baseReport,
+      payrollRows: calculatePayrollSnapshotRows({
+        businessDate,
+        staff,
+        closedTickets,
+        activeTickets: [],
+        currentTime: Date.now(),
+        adjustments: payrollAdjustments,
+        payments: payrollPayments,
+      }),
       drawerOpeningAmount: businessSession.openingAmount,
       drawerCashSales: drawer.cashSales,
       drawerReceivableCollections: drawer.receivableCollections,
@@ -5761,6 +5777,7 @@ function registerAdjustment(
           staff={staff}
           closedTickets={closedTickets}
           activeTickets={tickets}
+          reports={businessReports}
           currentTime={currentTime}
           adjustments={payrollAdjustments}
           payments={payrollPayments}

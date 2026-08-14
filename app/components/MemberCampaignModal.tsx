@@ -852,7 +852,102 @@ export default function MemberCampaignModal({ onClose }: Props) {
                 ? "作成中..."
                 : `クーポンを作成して${targetMembers.length}名へ配布`}
             </button>
-          </section>
+          
+            <div className="mt-8 border-t border-slate-700 pt-6">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <h3 className="text-xl font-black">
+                    作成済みクーポン
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-400">
+                    現在登録されているクーポンを確認・削除できます。
+                  </p>
+                </div>
+
+                <span className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-slate-300">
+                  {existingCoupons.length}件
+                </span>
+              </div>
+
+              {couponListError ? (
+                <div className="mt-4 rounded-xl bg-red-950/60 p-4 text-sm text-red-200">
+                  読み込みエラー
+                  <br />
+                  {couponListError}
+                </div>
+              ) : existingCoupons.length === 0 ? (
+                <div className="mt-4 rounded-xl bg-slate-800 p-5 text-center text-slate-400">
+                  作成済みクーポンはありません。
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {existingCoupons.map((coupon) => (
+                    <div
+                      key={coupon.id}
+                      className="rounded-2xl border border-slate-700 bg-slate-900 p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="text-lg font-black">
+                              {coupon.title}
+                            </h4>
+
+                            {!coupon.active && (
+                              <span className="rounded-full bg-slate-700 px-2 py-1 text-xs font-bold text-slate-300">
+                                非公開
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-2 text-xl font-black text-yellow-300">
+                            {couponDiscountLabel(
+                              coupon,
+                            )}
+                          </p>
+
+                          <p className="mt-1 text-sm text-slate-300">
+                            有効期限：
+                            {coupon.expireDate ||
+                              "未設定"}
+                          </p>
+
+                          {coupon.recipientCount !==
+                            null && (
+                            <p className="mt-1 text-sm text-slate-400">
+                              配布人数：
+                              {coupon.recipientCount}
+                              名
+                            </p>
+                          )}
+
+                          {coupon.description && (
+                            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-400">
+                              {coupon.description}
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void deleteExistingCoupon(
+                              coupon,
+                            )
+                          }
+                          disabled={busy}
+                          className="rounded-xl bg-red-800 px-4 py-3 font-black text-white disabled:opacity-50"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+</section>
         ) : (
           <section className="mt-5 rounded-2xl bg-slate-950 p-4 sm:p-5">
             <h3 className="text-xl font-black">イベントを作成</h3>

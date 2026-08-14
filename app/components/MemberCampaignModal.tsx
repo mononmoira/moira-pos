@@ -1,22 +1,43 @@
+
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
+  onSnapshot,
+  query,
   serverTimestamp,
+  where,
   writeBatch,
 } from "firebase/firestore";
 
 import { memberDb } from "../lib/memberFirebase";
-
 type Props = {
   onClose: () => void;
 };
 
 type CouponDiscountType = "amount" | "percent";
+
+type ExistingCoupon = {
+  id: string;
+  title: string;
+  description: string;
+  expireDate: string;
+  active: boolean;
+  discountAmount: number;
+  discountPercent: number;
+  recipientCount: number | null;
+  createdAtMs: number;
+};
 type DistributionType = "all" | "birthdayMonth" | "specific";
 
 type MemberOption = {
@@ -91,6 +112,10 @@ function getBirthMonth(birthday: string, explicitBirthMonth?: unknown) {
 export default function MemberCampaignModal({ onClose }: Props) {
   const [tab, setTab] = useState<"coupon" | "event">("coupon");
   const [busy, setBusy] = useState(false);
+  const [existingCoupons, setExistingCoupons] =
+    useState<ExistingCoupon[]>([]);
+  const [couponListError, setCouponListError] =
+    useState("");
   const [memberLoading, setMemberLoading] = useState(false);
   const [members, setMembers] = useState<MemberOption[]>([]);
 
@@ -189,6 +214,170 @@ export default function MemberCampaignModal({ onClose }: Props) {
     setDiscountValue(1000);
     setCouponTitle(`${month}月 お誕生日クーポン`);
     setCouponDescription("お誕生月のお会計から1,000円OFF");
+  }
+
+  useEffect(() => {
+    const unsubscribeCoupons = onSnapshot(
+      collection(memberDb, "coupons"),
+      (snapshot) => {
+        const next = snapshot.docs
+          .map((couponDoc) => {
+            const data = couponDoc.data();
+
+            const rawCreatedAt = data.createdAt as
+              | {
+                  toMillis?: () => number;
+                }
+              | undefined;
+
+            const discountAmount =
+              typeof data.discountAmount === "number"
+                ? data.discountAmount
+                : data.discountType === "amount" &&
+                    typeof data.discountValue === "number"
+                  ? Math.floor(data.discountValue)
+                  : 0;
+
+            const discountPercent =
+              typeof data.discountPercent === "number"
+                ? data.discountPercent
+                : data.discountType === "percent" &&
+                    typeof data.discountValue === "number"
+                  ? data.discountValue
+                  : 0;
+
+            return {
+              id: couponDoc.id,
+              title:
+                typeof data.title === "string"
+                  ? data.title
+                  : "名称なしクーポン",
+              description:
+                typeof data.description === "string"
+                  ? data.description
+                  : "",
+              expireDate:
+                typeof data.expireDate === "string"
+                  ? data.expireDate
+                  : "",
+              active: data.active !== false,
+              discountAmount,
+              discountPercent,
+              recipientCount:
+                typeof data.recipientCount === "number"
+                  ? data.recipientCount
+                  : null,
+              createdAtMs:
+                rawCreatedAt?.toMillis?.() ?? 0,
+            } satisfies ExistingCoupon;
+          })
+          .sort(
+            (a, b) =>
+              b.createdAtMs - a.createdAtMs,
+          );
+
+        setExistingCoupons(next);
+        setCouponListError("");
+      },
+      (error) => {
+        console.error(
+          "作成済みクーポンの取得に失敗しました。",
+          error,
+        );
+
+        setCouponListError(
+          firebaseErrorMessage(error),
+        );
+      },
+    );
+
+    return unsubscribeCoupons;
+  }, []);
+
+  function couponDiscountLabel(
+    coupon: ExistingCoupon,
+  ) {
+    if (coupon.discountAmount > 0) {
+      return `${coupon.discountAmount.toLocaleString(
+        "ja-JP",
+      )}円OFF`;
+    }
+
+    if (coupon.discountPercent > 0) {
+      return `${coupon.discountPercent}%OFF`;
+    }
+
+    return "値引き設定なし";
+  }
+
+  async function deleteExistingCoupon(
+    coupon: ExistingCoupon,
+  ) {
+    const confirmed = window.confirm(
+      `「${coupon.title}」を削除しますか？\n\n` +
+        `${couponDiscountLabel(coupon)}\n` +
+        `有効期限：${coupon.expireDate || "未設定"}\n\n` +
+        "未使用で配布中のクーポンは会員からも削除します。\n" +
+        "すでに使用済みの履歴は残します。",
+    );
+
+    if (!confirmed) return;
+
+    setBusy(true);
+
+    try {
+      const distributedSnapshot = await getDocs(
+        query(
+          collection(memberDb, "userCoupons"),
+          where("couponId", "==", coupon.id),
+        ),
+      );
+
+      const unusedDocs =
+        distributedSnapshot.docs.filter(
+          (couponDoc) =>
+            couponDoc.data().used !== true,
+        );
+
+      const usedCount =
+        distributedSnapshot.size -
+        unusedDocs.length;
+
+      for (const chunk of splitIntoChunks(
+        unusedDocs,
+        400,
+      )) {
+        const batch = writeBatch(memberDb);
+
+        for (const couponDoc of chunk) {
+          batch.delete(couponDoc.ref);
+        }
+
+        await batch.commit();
+      }
+
+      await deleteDoc(
+        doc(memberDb, "coupons", coupon.id),
+      );
+
+      alert(
+        `クーポンを削除しました。\n\n「${coupon.title}」\n` +
+          `未使用削除：${unusedDocs.length}枚\n` +
+          `使用済み履歴：${usedCount}枚を保持`,
+      );
+    } catch (error) {
+      console.error(
+        "クーポン削除に失敗しました。",
+        error,
+      );
+
+      alert(
+        "クーポン削除に失敗しました。\n\n" +
+          firebaseErrorMessage(error),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createCoupon() {

@@ -121,6 +121,7 @@ export default function MemberCampaignModal({ onClose }: Props) {
 
   const [couponTitle, setCouponTitle] = useState("");
   const [couponDescription, setCouponDescription] = useState("");
+  const [couponStartDate, setCouponStartDate] = useState("");
   const [couponExpireDate, setCouponExpireDate] = useState("");
   const [discountType, setDiscountType] =
     useState<CouponDiscountType>("amount");
@@ -389,10 +390,20 @@ export default function MemberCampaignModal({ onClose }: Props) {
       return;
     }
 
+    if (!couponStartDate) {
+  alert("使用開始日を入力してください。");
+  return;
+}
+    
     if (!couponExpireDate) {
       alert("有効期限を入力してください。");
       return;
     }
+
+    if (couponExpireDate < couponStartDate) {
+  alert("有効期限は使用開始日以降にしてください。");
+  return;
+}
 
     if (!Number.isFinite(discountValue) || discountValue <= 0) {
       alert(
@@ -447,6 +458,7 @@ export default function MemberCampaignModal({ onClose }: Props) {
         description,
         type: "manual",
         active: true,
+        startDate: couponStartDate,
         expireDate: couponExpireDate,
         pointNeed: 0,
         used: false,
@@ -485,6 +497,7 @@ export default function MemberCampaignModal({ onClose }: Props) {
             couponId: couponRef.id,
             title,
             description,
+            startDate: couponStartDate,
             expireDate: couponExpireDate,
             imageUrl: "",
             used: false,
@@ -506,6 +519,7 @@ export default function MemberCampaignModal({ onClose }: Props) {
 
       setCouponTitle("");
       setCouponDescription("");
+      setCouponStartDate("");
       setCouponExpireDate("");
       setDiscountType("amount");
       setDiscountValue(1000);
@@ -819,14 +833,38 @@ export default function MemberCampaignModal({ onClose }: Props) {
               </div>
             </div>
 
-            <label className="mt-4 block font-bold">有効期限</label>
-            <input
-              type="date"
-              value={couponExpireDate}
-              onChange={(event) => setCouponExpireDate(event.target.value)}
-              className="mt-2 w-full rounded-xl bg-slate-800 p-3"
-            />
+           <div className="mt-4 grid gap-3 sm:grid-cols-2">
+  <div>
+    <label className="block font-bold">
+      使用開始日
+    </label>
 
+    <input
+      type="date"
+      value={couponStartDate}
+      onChange={(event) =>
+        setCouponStartDate(event.target.value)
+      }
+      className="mt-2 w-full rounded-xl bg-slate-800 p-3"
+    />
+  </div>
+
+  <div>
+    <label className="block font-bold">
+      有効期限
+    </label>
+
+    <input
+      type="date"
+      value={couponExpireDate}
+      min={couponStartDate || undefined}
+      onChange={(event) =>
+        setCouponExpireDate(event.target.value)
+      }
+      className="mt-2 w-full rounded-xl bg-slate-800 p-3"
+    />
+  </div>
+</div>
             <div className="mt-4 rounded-xl border border-fuchsia-500/30 bg-fuchsia-950/40 p-4">
               <p className="font-black text-fuchsia-200">作成内容</p>
               <p className="mt-2 text-lg font-black">

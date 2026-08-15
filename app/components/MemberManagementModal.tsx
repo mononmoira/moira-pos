@@ -58,6 +58,7 @@ type UserCoupon = {
   couponId?: string;
   title: string;
   description: string;
+  startDate?: unknown;
   expireDate?: unknown;
   used: boolean;
   discountType: "amount" | "percent" | "unsupported";
@@ -414,6 +415,7 @@ export default function MemberManagementModal({
               typeof data.description === "string"
                 ? data.description
                 : "",
+            startDate: data.startDate,   
             expireDate: data.expireDate,
             used: data.used === true,
             ...discount,
@@ -422,8 +424,16 @@ export default function MemberManagementModal({
         .filter((coupon) => {
           if (coupon.used) return false;
 
-          const expireDate = couponDateToDate(coupon.expireDate);
-          return !expireDate || expireDate.getTime() >= now.getTime();
+          const startDate = couponDateToDate(coupon.startDate);
+const expireDate = couponDateToDate(coupon.expireDate);
+
+const alreadyStarted =
+  !startDate || startDate.getTime() <= now.getTime();
+
+const notExpired =
+  !expireDate || expireDate.getTime() >= now.getTime();
+
+return alreadyStarted && notExpired;
         });
 
       setMemberCoupons(nextCoupons);
@@ -1342,7 +1352,12 @@ export default function MemberManagementModal({
                               </p>
                             )}
                             <p className="mt-2 text-xs text-slate-400">
-                              有効期限：{formatCouponExpiry(coupon.expireDate)}
+                             利用期間：
+{coupon.startDate
+  ? formatCouponExpiry(coupon.startDate)
+  : "すぐ利用可"}
+{" ～ "}
+{formatCouponExpiry(coupon.expireDate)}
                             </p>
                           </div>
 

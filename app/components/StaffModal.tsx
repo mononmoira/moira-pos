@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ShiftSchedule } from "../lib/shiftFirebase";
 
 export type StaffRole =
   | "キャスト"
@@ -29,25 +30,31 @@ export type Staff = {
 
 type Props = {
   staff: Staff[];
+  publishedShifts: ShiftSchedule[];
+
   onClockIn: (
     staffId: string,
     businessTime: string,
   ) => void;
+
   onClockOut: (
     staffId: string,
     businessTime: string,
   ) => void;
+
   onUpdateStaff: (
     staffId: string,
     hourlyWage: number,
     paymentCycle: PaymentCycle,
   ) => void;
+
   onAddTemporaryStaff: (
     name: string,
     role: StaffRole,
     hourlyWage: number,
     paymentCycle: PaymentCycle,
   ) => void;
+
   onClose: () => void;
 };
 
@@ -63,6 +70,7 @@ const timeOptions = Array.from(
 
 export default function StaffModal({
   staff,
+  publishedShifts,
   onClockIn,
   onClockOut,
   onUpdateStaff,
@@ -102,7 +110,27 @@ export default function StaffModal({
     }
   }
 
-  return (
+  function selectScheduledStaff(shift: ShiftSchedule) {
+  const person = staff.find(
+    (item) => item.name === shift.staff,
+  );
+
+  if (!person) {
+    alert(
+      `${shift.staff}さんがPOSのスタッフ一覧に登録されていません。`,
+    );
+    return;
+  }
+
+  changeSelected(person.id);
+
+  // シフト開始時刻を出勤時刻へセット
+  setClockInTime(
+    shift.start || "21:00",
+  );
+}
+
+ return ( 
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 p-4">
       <div className="mx-auto my-4 w-full max-w-3xl rounded-3xl bg-slate-900 p-6 text-white">
         <div className="flex justify-between">
@@ -114,6 +142,57 @@ export default function StaffModal({
           >
             閉じる
           </button>
+        </div>
+
+                <div className="mt-6 rounded-2xl bg-slate-800 p-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold">
+              本日の出勤予定
+            </h3>
+
+            <span className="rounded-full bg-blue-700 px-3 py-1 text-sm font-bold">
+              {publishedShifts.length}人
+            </span>
+          </div>
+
+          {publishedShifts.length > 0 ? (
+            <div className="mt-4 space-y-2">
+             {publishedShifts.map((shift) => (
+  <button
+    key={shift.id}
+    type="button"
+    onClick={() =>
+      selectScheduledStaff(shift)
+    }
+    className="flex w-full items-center justify-between rounded-xl bg-slate-700 p-4 text-left hover:bg-slate-600"
+  >
+    <div>
+      <div className="text-lg font-bold">
+        {shift.staff}
+      </div>
+
+      {shift.memo && (
+        <div className="mt-1 text-sm text-slate-300">
+          {shift.memo}
+        </div>
+      )}
+    </div>
+
+    <div className="text-right font-bold">
+      {shift.start}
+      <span className="mx-1 text-slate-400">
+        〜
+      </span>
+      {shift.end || "LAST"}
+    </div>
+  </button>
+))} 
+            </div>
+          ) : (
+            <p className="mt-4 text-slate-400">
+              本日の公開シフトはありません。
+            </p>
+          )}
         </div>
 
         <label className="mt-6 block font-bold">

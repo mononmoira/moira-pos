@@ -20,6 +20,11 @@ import {
   setDoc,
 } from "firebase/firestore";
 
+import {
+  subscribePublishedShifts,
+  type ShiftSchedule,
+} from "./lib/shiftFirebase";
+
 import { db } from "./lib/firebase";
 import { memberDb } from "./lib/memberFirebase";
 
@@ -695,6 +700,9 @@ export default function Home() {
   const [businessReports, setBusinessReports] =
     useState<BusinessReport[]>([]);
   const [staff, setStaff] = useState<Staff[]>(initialStaff);
+
+  const [publishedShifts, setPublishedShifts] =
+  useState<ShiftSchedule[]>([]);
   const [hiddenStaffIds, setHiddenStaffIds] = useState<string[]>([]);
   const cloudStaffReadyRef = useRef(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -1170,6 +1178,56 @@ return mergedStaff;
       setDataLoaded(true);
     }
   }, [modeReady, isTestMode, loadAttempt]);
+
+  // ===== Moira-DAYS2 公開シフト連携 =====
+useEffect(() => {
+  const businessDate =
+    getBusinessDate(new Date());
+
+  let unsubscribe:
+    | (() => void)
+    | null = null;
+
+  let cancelled = false;
+
+  async function startShiftSync() {
+    try {
+      const stop =
+        await subscribePublishedShifts(
+          businessDate,
+          (shifts) => {
+            if (!cancelled) {
+              setPublishedShifts(shifts);
+            }
+          },
+        );
+
+      if (cancelled) {
+        stop();
+        return;
+      }
+
+      unsubscribe = stop;
+    } catch (error) {
+      console.error(
+        "シフト連携の開始に失敗しました。",
+        error,
+      );
+
+      if (!cancelled) {
+        setPublishedShifts([]);
+      }
+    }
+  }
+
+  startShiftSync();
+
+  return () => {
+    cancelled = true;
+    unsubscribe?.();
+  };
+}, []);
+// ===== シフト連携ここまで =====
 
  useEffect(() => {
   if (
@@ -6626,6 +6684,7 @@ function completePendingCashlessManually() {
       {showStaff && (
         <StaffModal
           staff={staff}
+          publishedShifts={publishedShifts}
           onClockIn={clockIn}
           onClockOut={clockOut}
           onUpdateStaff={updateStaff}

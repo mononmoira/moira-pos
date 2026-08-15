@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { BusinessSession } from "../page";
 
 type Figures = {
@@ -17,79 +17,589 @@ type Props = {
   closeMode: boolean;
   figures: Figures | null;
   onStart: (openingAmount: number) => void;
-  onAddEntry: (type: "入金" | "出金", amount: number, note: string) => void;
+  onAddEntry: (
+    type: "入金" | "出金",
+    amount: number,
+    note: string,
+  ) => void;
   onDeleteEntry: (entryId: string) => void;
   onCloseBusiness: (closingAmount: number) => void;
   onClose: () => void;
 };
 
+const DENOMINATIONS = [
+  10,
+  50,
+  100,
+  500,
+  1000,
+  5000,
+  10000,
+] as const;
+
+type Denomination =
+  (typeof DENOMINATIONS)[number];
+
+type DrawerCounts = Record<
+  Denomination,
+  number
+>;
+
+function createEmptyCounts(): DrawerCounts {
+  return {
+    10: 0,
+    50: 0,
+    100: 0,
+    500: 0,
+    1000: 0,
+    5000: 0,
+    10000: 0,
+  };
+}
+
+function calculateTotal(
+  counts: DrawerCounts,
+) {
+  return DENOMINATIONS.reduce(
+    (total, denomination) =>
+      total +
+      denomination *
+        counts[denomination],
+    0,
+  );
+}
+
 function yen(value: number) {
-  return `${value.toLocaleString("ja-JP")}円`;
+  return `${value.toLocaleString(
+    "ja-JP",
+  )}円`;
 }
 
 export default function DrawerModal({
-  session, closeMode, figures, onStart, onAddEntry, onDeleteEntry, onCloseBusiness, onClose,
+  session,
+  closeMode,
+  figures,
+  onStart,
+  onAddEntry,
+  onDeleteEntry,
+  onCloseBusiness,
+  onClose,
 }: Props) {
-  const [openingAmount, setOpeningAmount] = useState(0);
-  const [type, setType] = useState<"入金" | "出金">("出金");
-  const [amount, setAmount] = useState(0);
-  const [note, setNote] = useState("");
-  const [closingAmount, setClosingAmount] = useState(figures?.expected ?? 0);
+  const [
+    openingCounts,
+    setOpeningCounts,
+  ] = useState<DrawerCounts>(
+    createEmptyCounts(),
+  );
 
-  useEffect(() => {
-    if (figures) setClosingAmount(figures.expected);
-  }, [figures]);
+  const [
+    closingCounts,
+    setClosingCounts,
+  ] = useState<DrawerCounts>(
+    createEmptyCounts(),
+  );
+
+  const [type, setType] =
+    useState<"入金" | "出金">(
+      "出金",
+    );
+
+  const [amount, setAmount] =
+    useState(0);
+
+  const [note, setNote] =
+    useState("");
+
+  const openingTotal =
+    calculateTotal(openingCounts);
+
+  const closingTotal =
+    calculateTotal(closingCounts);
+
+  const expectedAmount =
+    figures?.expected ?? 0;
+
+  const difference =
+    closingTotal - expectedAmount;
+
+  function updateOpeningCount(
+    denomination: Denomination,
+    value: number,
+  ) {
+    setOpeningCounts((current) => ({
+      ...current,
+      [denomination]: Math.max(
+        0,
+        Math.floor(value || 0),
+      ),
+    }));
+  }
+
+  function updateClosingCount(
+    denomination: Denomination,
+    value: number,
+  ) {
+    setClosingCounts((current) => ({
+      ...current,
+      [denomination]: Math.max(
+        0,
+        Math.floor(value || 0),
+      ),
+    }));
+  }
 
   return (
     <div className="fixed inset-0 z-[115] overflow-y-auto bg-black/90 p-4">
       <div className="mx-auto my-4 w-full max-w-4xl rounded-3xl bg-slate-900 p-6 text-white">
         <div className="flex items-start justify-between gap-4">
-          <div><h2 className="text-3xl font-black">ドロア管理</h2><p className="mt-2 text-slate-400">営業開始金・買い物・その他入出金・締め金額</p></div>
-          <button type="button" onClick={onClose} className="rounded-xl bg-slate-700 px-5 py-3 font-bold">閉じる</button>
+          <div>
+            <h2 className="text-3xl font-black">
+              ドロア管理
+            </h2>
+
+            <p className="mt-2 text-slate-400">
+              営業開始金・買い物・その他入出金・締め金額
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl bg-slate-700 px-5 py-3 font-bold"
+          >
+            閉じる
+          </button>
         </div>
 
         {!session ? (
           <section className="mt-6 rounded-2xl bg-slate-800 p-5">
-            <h3 className="text-2xl font-bold">営業開始</h3>
-            <label className="mt-4 block font-bold">開始時のドロア金額</label>
-            <input type="number" min={0} value={openingAmount} onChange={(e)=>setOpeningAmount(Number(e.target.value))} className="mt-2 w-full rounded-xl bg-slate-700 p-4 text-2xl"/>
-            <button type="button" onClick={()=>onStart(openingAmount)} className="mt-4 min-h-14 w-full rounded-xl bg-emerald-700 p-4 text-xl font-bold">この金額で営業開始</button>
+            <h3 className="text-2xl font-bold">
+              営業開始
+            </h3>
+
+            <p className="mt-2 text-slate-400">
+              ドロア内の現金を金種ごとに数えてください。
+            </p>
+
+            <div className="mt-5 space-y-3">
+              {DENOMINATIONS.map(
+                (denomination) => {
+                  const count =
+                    openingCounts[
+                      denomination
+                    ];
+
+                  const subtotal =
+                    denomination * count;
+
+                  return (
+                    <div
+                      key={
+                        denomination
+                      }
+                      className="grid grid-cols-[1fr_150px] items-center gap-4 rounded-xl bg-slate-700 p-4"
+                    >
+                      <div>
+                        <p className="text-xl font-black">
+                          {yen(
+                            denomination,
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-sm text-slate-300">
+                          小計：
+                          {yen(subtotal)}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          step={1}
+                          value={count}
+                          onChange={(
+                            event,
+                          ) =>
+                            updateOpeningCount(
+                              denomination,
+                              Number(
+                                event
+                                  .target
+                                  .value,
+                              ),
+                            )
+                          }
+                          className="w-full rounded-xl bg-slate-900 p-3 text-right text-xl font-bold"
+                        />
+
+                        <span className="font-bold">
+                          枚
+                        </span>
+                      </div>
+                    </div>
+                  );
+                },
+              )}
+            </div>
+
+            <div className="mt-5 rounded-2xl bg-emerald-950 p-5">
+              <p className="text-emerald-200">
+                開始時ドロア合計
+              </p>
+
+              <p className="mt-1 text-4xl font-black text-emerald-300">
+                {yen(openingTotal)}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                onStart(openingTotal)
+              }
+              className="mt-4 min-h-14 w-full rounded-xl bg-emerald-700 p-4 text-xl font-bold"
+            >
+              この金額で営業開始
+            </button>
           </section>
         ) : (
           <>
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-xl bg-slate-800 p-4"><p className="text-slate-400">開始金</p><p className="mt-1 text-xl font-bold">{yen(session.openingAmount)}</p></div>
-              <div className="rounded-xl bg-slate-800 p-4"><p className="text-slate-400">現金売上</p><p className="mt-1 text-xl font-bold">{yen(figures?.cashSales ?? 0)}</p></div>
-              <div className="rounded-xl bg-slate-800 p-4"><p className="text-slate-400">給与支払</p><p className="mt-1 text-xl font-bold text-red-300">-{yen(figures?.payrollOut ?? 0)}</p></div>
-              <div className="rounded-xl bg-orange-950 p-4"><p className="text-orange-200">現在予定額</p><p className="mt-1 text-2xl font-black">{yen(figures?.expected ?? 0)}</p></div>
+              <div className="rounded-xl bg-slate-800 p-4">
+                <p className="text-slate-400">
+                  開始金
+                </p>
+
+                <p className="mt-1 text-xl font-bold">
+                  {yen(
+                    session.openingAmount,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-slate-800 p-4">
+                <p className="text-slate-400">
+                  現金売上
+                </p>
+
+                <p className="mt-1 text-xl font-bold">
+                  {yen(
+                    figures?.cashSales ??
+                      0,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-slate-800 p-4">
+                <p className="text-slate-400">
+                  給与支払
+                </p>
+
+                <p className="mt-1 text-xl font-bold text-red-300">
+                  -
+                  {yen(
+                    figures?.payrollOut ??
+                      0,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl bg-orange-950 p-4">
+                <p className="text-orange-200">
+                  現在予定額
+                </p>
+
+                <p className="mt-1 text-2xl font-black">
+                  {yen(expectedAmount)}
+                </p>
+              </div>
             </div>
 
             {!closeMode && (
               <section className="mt-5 rounded-2xl bg-slate-800 p-5">
-                <h3 className="text-2xl font-bold">営業中の金額変動</h3>
+                <h3 className="text-2xl font-bold">
+                  営業中の金額変動
+                </h3>
+
                 <div className="mt-4 grid grid-cols-2 gap-3">
-                  <button type="button" onClick={()=>setType("入金")} className={`rounded-xl p-3 font-bold ${type==="入金"?"bg-emerald-700":"bg-slate-700"}`}>その他入金</button>
-                  <button type="button" onClick={()=>setType("出金")} className={`rounded-xl p-3 font-bold ${type==="出金"?"bg-red-700":"bg-slate-700"}`}>買い物・その他出金</button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setType("入金")
+                    }
+                    className={`rounded-xl p-3 font-bold ${
+                      type === "入金"
+                        ? "bg-emerald-700"
+                        : "bg-slate-700"
+                    }`}
+                  >
+                    その他入金
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setType("出金")
+                    }
+                    className={`rounded-xl p-3 font-bold ${
+                      type === "出金"
+                        ? "bg-red-700"
+                        : "bg-slate-700"
+                    }`}
+                  >
+                    買い物・その他出金
+                  </button>
                 </div>
-                <input type="number" min={0} value={amount} onChange={(e)=>setAmount(Number(e.target.value))} placeholder="金額" className="mt-3 w-full rounded-xl bg-slate-700 p-3 text-xl"/>
-                <input value={note} onChange={(e)=>setNote(e.target.value)} placeholder="内容（例：氷購入、雑収入）" className="mt-3 w-full rounded-xl bg-slate-700 p-3"/>
-                <button type="button" onClick={()=>{if(amount<=0)return;onAddEntry(type,amount,note);setAmount(0);setNote("");}} className="mt-3 w-full rounded-xl bg-blue-700 p-3 font-bold">記録する</button>
+
+                <input
+                  type="number"
+                  min={0}
+                  value={amount}
+                  onChange={(event) =>
+                    setAmount(
+                      Number(
+                        event.target
+                          .value,
+                      ),
+                    )
+                  }
+                  placeholder="金額"
+                  className="mt-3 w-full rounded-xl bg-slate-700 p-3 text-xl"
+                />
+
+                <input
+                  value={note}
+                  onChange={(event) =>
+                    setNote(
+                      event.target
+                        .value,
+                    )
+                  }
+                  placeholder="内容（例：氷購入、雑収入）"
+                  className="mt-3 w-full rounded-xl bg-slate-700 p-3"
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (amount <= 0)
+                      return;
+
+                    onAddEntry(
+                      type,
+                      amount,
+                      note,
+                    );
+
+                    setAmount(0);
+                    setNote("");
+                  }}
+                  className="mt-3 w-full rounded-xl bg-blue-700 p-3 font-bold"
+                >
+                  記録する
+                </button>
               </section>
             )}
 
             <section className="mt-5 rounded-2xl bg-slate-800 p-5">
-              <h3 className="text-xl font-bold">営業中の入出金履歴</h3>
-              {session.entries.length===0 ? <p className="mt-3 text-slate-400">記録はありません。</p> : <div className="mt-3 space-y-2">{session.entries.slice().reverse().map(entry=><div key={entry.id} className="flex items-center justify-between rounded-xl bg-slate-700 p-3"><div><p className="font-bold">{entry.note}</p><p className="text-sm text-slate-400">{entry.type}</p></div><div className="flex items-center gap-3"><strong className={entry.type==="入金"?"text-emerald-300":"text-red-300"}>{entry.type==="入金"?"+":"-"}{yen(entry.amount)}</strong><button type="button" onClick={()=>onDeleteEntry(entry.id)} className="rounded-lg bg-red-900 px-3 py-2 text-sm">取消</button></div></div>)}</div>}
+              <h3 className="text-xl font-bold">
+                営業中の入出金履歴
+              </h3>
+
+              {session.entries.length ===
+              0 ? (
+                <p className="mt-3 text-slate-400">
+                  記録はありません。
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {session.entries
+                    .slice()
+                    .reverse()
+                    .map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex items-center justify-between rounded-xl bg-slate-700 p-3"
+                      >
+                        <div>
+                          <p className="font-bold">
+                            {entry.note}
+                          </p>
+
+                          <p className="text-sm text-slate-400">
+                            {entry.type}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <strong
+                            className={
+                              entry.type ===
+                              "入金"
+                                ? "text-emerald-300"
+                                : "text-red-300"
+                            }
+                          >
+                            {entry.type ===
+                            "入金"
+                              ? "+"
+                              : "-"}
+                            {yen(
+                              entry.amount,
+                            )}
+                          </strong>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onDeleteEntry(
+                                entry.id,
+                              )
+                            }
+                            className="rounded-lg bg-red-900 px-3 py-2 text-sm"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
             </section>
 
             {closeMode && (
               <section className="mt-5 rounded-2xl border-2 border-red-600 bg-red-950/40 p-5">
-                <h3 className="text-2xl font-bold">営業終了</h3>
-                <p className="mt-2">ドロア予定額：<strong>{yen(figures?.expected ?? 0)}</strong></p>
-                <label className="mt-4 block font-bold">実際に数えたドロア金額</label>
-                <input type="number" min={0} value={closingAmount} onChange={(e)=>setClosingAmount(Number(e.target.value))} className="mt-2 w-full rounded-xl bg-slate-800 p-4 text-2xl"/>
-                <p className="mt-3 text-xl">過不足：<strong>{closingAmount-(figures?.expected??0)>=0?"+":""}{yen(closingAmount-(figures?.expected??0))}</strong></p>
-                <button type="button" onClick={()=>onCloseBusiness(closingAmount)} className="mt-4 min-h-14 w-full rounded-xl bg-red-700 p-4 text-xl font-bold">この金額で営業終了</button>
+                <h3 className="text-2xl font-bold">
+                  営業終了
+                </h3>
+
+                <p className="mt-2">
+                  ドロア予定額：
+                  <strong>
+                    {yen(
+                      expectedAmount,
+                    )}
+                  </strong>
+                </p>
+
+                <p className="mt-2 text-slate-300">
+                  実際にドロア内にある現金を金種ごとに数えてください。
+                </p>
+
+                <div className="mt-5 space-y-3">
+                  {DENOMINATIONS.map(
+                    (denomination) => {
+                      const count =
+                        closingCounts[
+                          denomination
+                        ];
+
+                      const subtotal =
+                        denomination *
+                        count;
+
+                      return (
+                        <div
+                          key={
+                            denomination
+                          }
+                          className="grid grid-cols-[1fr_150px] items-center gap-4 rounded-xl bg-slate-900 p-4"
+                        >
+                          <div>
+                            <p className="text-xl font-black">
+                              {yen(
+                                denomination,
+                              )}
+                            </p>
+
+                            <p className="mt-1 text-sm text-slate-400">
+                              小計：
+                              {yen(
+                                subtotal,
+                              )}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={0}
+                              step={1}
+                              value={count}
+                              onChange={(
+                                event,
+                              ) =>
+                                updateClosingCount(
+                                  denomination,
+                                  Number(
+                                    event
+                                      .target
+                                      .value,
+                                  ),
+                                )
+                              }
+                              className="w-full rounded-xl bg-slate-800 p-3 text-right text-xl font-bold"
+                            />
+
+                            <span className="font-bold">
+                              枚
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    },
+                  )}
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl bg-slate-900 p-5">
+                    <p className="text-slate-400">
+                      実際のドロア合計
+                    </p>
+
+                    <p className="mt-1 text-3xl font-black">
+                      {yen(
+                        closingTotal,
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-900 p-5">
+                    <p className="text-slate-400">
+                      過不足
+                    </p>
+
+                    <p
+                      className={`mt-1 text-3xl font-black ${
+                        difference === 0
+                          ? "text-emerald-300"
+                          : difference > 0
+                            ? "text-blue-300"
+                            : "text-red-300"
+                      }`}
+                    >
+                      {difference > 0
+                        ? "+"
+                        : ""}
+                      {yen(difference)}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onCloseBusiness(
+                      closingTotal,
+                    )
+                  }
+                  className="mt-4 min-h-14 w-full rounded-xl bg-red-700 p-4 text-xl font-bold"
+                >
+                  この金額で営業終了
+                </button>
               </section>
             )}
           </>

@@ -3922,6 +3922,94 @@ function registerAdjustment(
     };
   }
 
+function completePendingCashlessManually() {
+  if (
+    !requireIpadPos(
+      "キャッシュレス決済済みの反映",
+    )
+  ) {
+    return;
+  }
+
+  if (!selectedTicket) return;
+
+  const balance =
+    calculateBalance(selectedTicket);
+
+  if (balance <= 0) {
+    alert(
+      "この伝票はすでに会計済みです。",
+    );
+    return;
+  }
+
+  const pendingRaw =
+    sessionStorage.getItem(
+      SQUARE_PENDING_STORAGE_KEY,
+    );
+
+  if (!pendingRaw) {
+    alert(
+      "直前のキャッシュレス決済情報が見つかりません。\nSquare側の決済履歴を確認してください。",
+    );
+    return;
+  }
+
+  let pending: PendingSquarePayment;
+
+  try {
+    pending = JSON.parse(
+      pendingRaw,
+    ) as PendingSquarePayment;
+  } catch {
+    alert(
+      "キャッシュレス決済情報を読み取れませんでした。",
+    );
+    return;
+  }
+
+  if (
+    pending.ticketId !==
+    selectedTicket.id
+  ) {
+    alert(
+      "この伝票と直前のキャッシュレス決済情報が一致しません。",
+    );
+    return;
+  }
+
+  const methodLabel =
+    pending.method === "QR"
+      ? "QR決済"
+      : "カード・電子マネー";
+
+  const confirmed =
+    window.confirm(
+      `Square側で決済完了を確認しましたか？\n\n` +
+        `${methodLabel}\n` +
+        `決済額：${formatYen(
+          pending.chargedAmount,
+        )}\n\n` +
+        `OKを押すと、この伝票へキャッシュレス決済済みとして反映します。\n` +
+        `現金ドロアは変動しません。`,
+    );
+
+  if (!confirmed) return;
+
+  handleSquarePaymentCallback({
+    status: "ok",
+    state: pending.requestId,
+  });
+
+  recordAudit(
+    "手動反映",
+    "キャッシュレス決済",
+    `${selectedTicket.customerName} / ${methodLabel} / ${formatYen(
+      pending.chargedAmount,
+    )}`,
+  );
+}
+
   async function finishTicket() {
 
     if (!requireIpadPos("伝票終了")) return;
@@ -5754,6 +5842,16 @@ function registerAdjustment(
                   </div>
                 )}
 
+                {calculateBalance(selectedTicket) > 0 && (
+  <button
+    type="button"
+    onClick={completePendingCashlessManually}
+    className="mt-4 min-h-14 w-full rounded-xl bg-purple-700 p-3 text-lg font-bold"
+  >
+    キャッシュレス決済済みを反映
+  </button>
+)}
+                
                 <button
                   type="button"
                   onClick={finishTicket}

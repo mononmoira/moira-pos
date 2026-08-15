@@ -83,8 +83,8 @@ export default function StaffModal({
     useState<PaymentCycle>(
       selected?.paymentCycle ?? "当日日払い",
     );
-  const [clockInTime, setClockInTime] = useState("20:00");
-  const [clockOutTime, setClockOutTime] = useState("29:00");
+  const [clockInTime, setClockInTime] = useState("21:00");
+  const [clockOutTime, setClockOutTime] = useState("25:00");
 
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] =

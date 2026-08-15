@@ -312,6 +312,7 @@ export type Ticket = TableTicket & {
   memberUid?: string;
   memberName?: string;
   memberNo?: string;
+  memberLinks?: MemberTicketLink[];
 };
 
 export type ClosedTicket = Ticket & {
@@ -1600,6 +1601,48 @@ useEffect(() => {
 
   function calculateTicketTotal(ticket: Ticket) {
     return ticket.courseTotal + calculateOrderTotal(ticket);
+  }
+
+  function getTicketMemberLinks(
+    ticket: Ticket,
+  ): MemberTicketLink[] {
+    const fromArray = Array.isArray(
+      ticket.memberLinks,
+    )
+      ? ticket.memberLinks.filter(
+          (item) =>
+            item &&
+            typeof item.uid === "string" &&
+            item.uid.trim(),
+        )
+      : [];
+
+    const legacy =
+      ticket.memberUid
+        ? [
+            {
+              uid: ticket.memberUid,
+              memberNo: ticket.memberNo,
+              name: ticket.memberName,
+            } satisfies MemberTicketLink,
+          ]
+        : [];
+
+    const merged = [
+      ...legacy,
+      ...fromArray,
+    ];
+
+    const seen = new Set<string>();
+
+    return merged.filter((item) => {
+      if (seen.has(item.uid)) {
+        return false;
+      }
+
+      seen.add(item.uid);
+      return true;
+    });
   }
 
   function calculateMemberPointEligibleAmount(ticket: Ticket) {
@@ -3394,27 +3437,109 @@ function registerAdjustment(
       return false;
     }
 
+    const currentMembers =
+      getTicketMemberLinks(targetTicket);
+
+    if (
+      currentMembers.some(
+        (item) => item.uid === member.uid,
+      )
+    ) {
+      return true;
+    }
+
+    const nextMembers = [
+      ...currentMembers,
+      member,
+    ];
+
+    const primary =
+      nextMembers[0];
+
     setTickets((current) =>
       current.map((ticket) =>
         ticket.id === ticketId
           ? {
               ...ticket,
-              memberUid: member.uid,
-              memberName: member.name,
-              memberNo: member.memberNo,
+              memberLinks: nextMembers,
+              // 既存処理との互換用。
+              // memberUidには先頭の会員を保持する。
+              memberUid: primary.uid,
+              memberName: primary.name,
+              memberNo: primary.memberNo,
             }
           : ticket,
       ),
     );
 
     const seatName =
-      seats.find((seat) => seat.id === targetTicket.seatId)?.name ??
+      seats.find(
+        (seat) =>
+          seat.id === targetTicket.seatId,
+      )?.name ??
       `席${targetTicket.seatId}`;
 
     recordAudit(
       "連携",
       "会員",
-      `${member.name ?? member.memberNo ?? member.uid} / ${seatName}`,
+      `${member.name ?? member.memberNo ?? member.uid} / ${seatName} / 会員${nextMembers.length}名`,
+    );
+
+    return true;
+  }
+
+  function unlinkMemberFromTicket(
+    ticketId: string,
+    memberUid: string,
+  ) {
+    if (!requireIpadPos("会員連携解除")) {
+      return false;
+    }
+
+    const targetTicket = tickets.find(
+      (ticket) => ticket.id === ticketId,
+    );
+
+    if (!targetTicket) {
+      return false;
+    }
+
+    if (targetTicket.payments.length > 0) {
+      alert(
+        "支払い登録後は会員連携を解除できません。",
+      );
+      return false;
+    }
+
+    const currentMembers =
+      getTicketMemberLinks(targetTicket);
+
+    const nextMembers =
+      currentMembers.filter(
+        (item) => item.uid !== memberUid,
+      );
+
+    const primary =
+      nextMembers[0];
+
+    setTickets((current) =>
+      current.map((ticket) =>
+        ticket.id === ticketId
+          ? {
+              ...ticket,
+              memberLinks: nextMembers,
+              memberUid: primary?.uid,
+              memberName: primary?.name,
+              memberNo: primary?.memberNo,
+            }
+          : ticket,
+      ),
+    );
+
+    recordAudit(
+      "解除",
+      "会員",
+      `伝票 ${ticketId} / 会員UID ${memberUid}`,
     );
 
     return true;
@@ -3548,99 +3673,251 @@ function registerAdjustment(
     );
   }
 
-  async function creditMemberCheckoutPoints(ticket: Ticket) {
-    if (!ticket.memberUid) {
+  async function creditMemberCheckoutPoints(
+    ticket: Ticket,
+  ) {
+    const linkedMembers =
+      getTicketMemberLinks(ticket);
+
+    if (linkedMembers.length === 0) {
       return {
         credited: false,
         alreadyCredited: false,
+        creditedMemberCount: 0,
+        memberCount: 0,
         totalPoint: 0,
         salesPoint: 0,
+        totalSalesPoint: 0,
         eligibleAmount: 0,
       };
     }
 
     const eligibleAmount =
-      calculateMemberPointEligibleAmount(ticket);
-    const salesPoint = Math.floor(eligibleAmount / 100);
-    const visitPoint = 30;
-    const totalPoint = visitPoint + salesPoint;
+      calculateMemberPointEligibleAmount(
+        ticket,
+      );
 
-    const memberRef = doc(
+    // 税抜ポイント対象額100円につき1pt。
+    // 複数会員の場合は会計ポイントを均等割りし、
+    // 余りは付与せず全員同じptにする。
+    const totalSalesPoint =
+      Math.floor(eligibleAmount / 100);
+
+    const memberCount =
+      linkedMembers.length;
+
+    const salesPoint =
+      Math.floor(
+        totalSalesPoint / memberCount,
+      );
+
+    const visitPoint = 10;
+    const totalPoint =
+      visitPoint + salesPoint;
+
+    let creditedMemberCount = 0;
+    let alreadyCreditedCount = 0;
+
+    await runTransaction(
       memberDb,
-      "users",
-      ticket.memberUid,
+      async (transaction) => {
+        const records: Array<{
+          member: MemberTicketLink;
+          memberRef: ReturnType<typeof doc>;
+          visitRef: ReturnType<typeof doc>;
+          memberSnapshot: Awaited<
+            ReturnType<
+              typeof transaction.get
+            >
+          >;
+          visitSnapshot: Awaited<
+            ReturnType<
+              typeof transaction.get
+            >
+          >;
+          legacyVisitSnapshot:
+            | Awaited<
+                ReturnType<
+                  typeof transaction.get
+                >
+              >
+            | null;
+        }> = [];
+
+        // Firestore Transactionは、
+        // 全readを先に終えてからwriteする。
+        for (
+          let index = 0;
+          index < linkedMembers.length;
+          index += 1
+        ) {
+          const member =
+            linkedMembers[index];
+
+          const memberRef = doc(
+            memberDb,
+            "users",
+            member.uid,
+          );
+
+          const visitRef = doc(
+            memberDb,
+            "visitHistory",
+            `${ticket.id}-${member.uid}`,
+          );
+
+          const memberSnapshot =
+            await transaction.get(memberRef);
+
+          const visitSnapshot =
+            await transaction.get(visitRef);
+
+          // 旧1名制で既に付与済みの伝票との重複防止。
+          const legacyVisitRef =
+            index === 0
+              ? doc(
+                  memberDb,
+                  "visitHistory",
+                  ticket.id,
+                )
+              : null;
+
+          const legacyVisitSnapshot =
+            legacyVisitRef
+              ? await transaction.get(
+                  legacyVisitRef,
+                )
+              : null;
+
+          records.push({
+            member,
+            memberRef,
+            visitRef,
+            memberSnapshot,
+            visitSnapshot,
+            legacyVisitSnapshot,
+          });
+        }
+
+        for (const record of records) {
+          if (
+            !record.memberSnapshot.exists()
+          ) {
+            throw new Error(
+              "member-not-found",
+            );
+          }
+
+          const legacyVisitData =
+            record.legacyVisitSnapshot?.exists() === true
+              ? (record.legacyVisitSnapshot.data() as {
+                  uid?: string;
+                })
+              : null;
+
+          const legacyMatches =
+            legacyVisitData?.uid === record.member.uid;
+
+          if (
+            record.visitSnapshot.exists() ||
+            legacyMatches
+          ) {
+            alreadyCreditedCount += 1;
+            continue;
+          }
+
+          transaction.update(
+            record.memberRef,
+            {
+              point:
+                increment(totalPoint),
+              visitCount: increment(1),
+              lastVisitAt:
+                serverTimestamp(),
+            },
+          );
+
+          transaction.set(
+            doc(
+              memberDb,
+              "pointLogs",
+              `visit-${ticket.id}-${record.member.uid}`,
+            ),
+            {
+              uid: record.member.uid,
+              point: visitPoint,
+              detail: "来店ポイント",
+              ticketId: ticket.id,
+              groupMemberCount:
+                memberCount,
+              createdAt:
+                serverTimestamp(),
+            },
+          );
+
+          if (salesPoint > 0) {
+            transaction.set(
+              doc(
+                memberDb,
+                "pointLogs",
+                `sales-${ticket.id}-${record.member.uid}`,
+              ),
+              {
+                uid: record.member.uid,
+                point: salesPoint,
+                detail:
+                  `会計ポイント 均等分配 ${eligibleAmount.toLocaleString("ja-JP")}円 / ${memberCount}名`,
+                ticketId: ticket.id,
+                groupEligibleAmount:
+                  eligibleAmount,
+                groupSalesPoint:
+                  totalSalesPoint,
+                groupMemberCount:
+                  memberCount,
+                createdAt:
+                  serverTimestamp(),
+              },
+            );
+          }
+
+          transaction.set(
+            record.visitRef,
+            {
+              uid: record.member.uid,
+              amount: eligibleAmount,
+              point: totalPoint,
+              visitPoint,
+              salesPoint,
+              groupEligibleAmount:
+                eligibleAmount,
+              groupSalesPoint:
+                totalSalesPoint,
+              groupMemberCount:
+                memberCount,
+              ticketId: ticket.id,
+              visitedAt:
+                serverTimestamp(),
+            },
+          );
+
+          creditedMemberCount += 1;
+        }
+      },
     );
-    const visitRef = doc(
-      memberDb,
-      "visitHistory",
-      ticket.id,
-    );
-    const visitPointLogRef = doc(
-      memberDb,
-      "pointLogs",
-      `visit-${ticket.id}`,
-    );
-    const salesPointLogRef = doc(
-      memberDb,
-      "pointLogs",
-      `sales-${ticket.id}`,
-    );
-
-    let alreadyCredited = false;
-
-    await runTransaction(memberDb, async (transaction) => {
-      const memberSnapshot =
-        await transaction.get(memberRef);
-      const visitSnapshot =
-        await transaction.get(visitRef);
-
-      if (!memberSnapshot.exists()) {
-        throw new Error("member-not-found");
-      }
-
-      if (visitSnapshot.exists()) {
-        alreadyCredited = true;
-        return;
-      }
-
-      transaction.update(memberRef, {
-        point: increment(totalPoint),
-        visitCount: increment(1),
-        lastVisitAt: serverTimestamp(),
-      });
-
-      transaction.set(visitPointLogRef, {
-        uid: ticket.memberUid,
-        point: visitPoint,
-        detail: "来店ポイント",
-        ticketId: ticket.id,
-        createdAt: serverTimestamp(),
-      });
-
-      if (salesPoint > 0) {
-        transaction.set(salesPointLogRef, {
-          uid: ticket.memberUid,
-          point: salesPoint,
-          detail: `会計ポイント ${eligibleAmount.toLocaleString("ja-JP")}円`,
-          ticketId: ticket.id,
-          createdAt: serverTimestamp(),
-        });
-      }
-
-      transaction.set(visitRef, {
-        uid: ticket.memberUid,
-        amount: eligibleAmount,
-        point: totalPoint,
-        ticketId: ticket.id,
-        visitedAt: serverTimestamp(),
-      });
-    });
 
     return {
-      credited: !alreadyCredited,
-      alreadyCredited,
+      credited:
+        creditedMemberCount > 0,
+      alreadyCredited:
+        creditedMemberCount === 0 &&
+        alreadyCreditedCount > 0,
+      creditedMemberCount,
+      memberCount,
+      // 1人あたりの付与pt
       totalPoint,
       salesPoint,
+      // グループ全体の会計pt
+      totalSalesPoint,
       eligibleAmount,
     };
   }
@@ -3658,32 +3935,58 @@ function registerAdjustment(
       return;
     }
 
+    const linkedMembers =
+      getTicketMemberLinks(
+        selectedTicket,
+      );
+
     const pointEligibleAmount =
-      calculateMemberPointEligibleAmount(selectedTicket);
-    const expectedSalesPoint =
-      Math.floor(pointEligibleAmount / 100);
-    const expectedTotalPoint =
-      selectedTicket.memberUid
-        ? 30 + expectedSalesPoint
+      calculateMemberPointEligibleAmount(
+        selectedTicket,
+      );
+
+    const groupSalesPoint =
+      Math.floor(
+        pointEligibleAmount / 100,
+      );
+
+    const salesPointPerMember =
+      linkedMembers.length > 0
+        ? Math.floor(
+            groupSalesPoint /
+              linkedMembers.length,
+          )
         : 0;
 
-    const confirmMessage = selectedTicket.memberUid
-      ? `会計済みとして伝票を終了しますか？\n\n` +
-        `${selectedTicket.memberName ?? "会員"}様へ ` +
-        `来店30pt＋会計${expectedSalesPoint}pt（合計${expectedTotalPoint}pt）を自動付与します。`
-      : "会計済みとして伝票を終了しますか？";
+    const totalPointPerMember =
+      linkedMembers.length > 0
+        ? 10 + salesPointPerMember
+        : 0;
 
-    if (!window.confirm(confirmMessage)) return;
+    const confirmMessage =
+      linkedMembers.length > 0
+        ? `会計済みとして伝票を終了しますか？\n\n` +
+          `会員${linkedMembers.length}名へそれぞれ\n` +
+          `来店10pt＋会計${salesPointPerMember}pt\n` +
+          `＝1人 ${totalPointPerMember}pt を自動付与します。\n\n` +
+          `会計ポイントは均等分配・端数切り捨てです。`
+        : "会計済みとして伝票を終了しますか？";
 
-    if (selectedTicket.memberUid) {
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    if (linkedMembers.length > 0) {
       try {
         const pointResult =
-          await creditMemberCheckoutPoints(selectedTicket);
+          await creditMemberCheckoutPoints(
+            selectedTicket,
+          );
 
         if (pointResult.credited) {
           alert(
-            `${selectedTicket.memberName ?? "会員"}様へ ` +
-              `${pointResult.totalPoint}ptを自動付与しました。`,
+            `会員${pointResult.creditedMemberCount}名へ、1人${pointResult.totalPoint}ptを自動付与しました。\n` +
+              `（来店10pt＋会計${pointResult.salesPoint}pt）`,
           );
         }
       } catch (error) {
@@ -3693,10 +3996,13 @@ function registerAdjustment(
         );
 
         const message =
-          error instanceof Error ? error.message : "";
+          error instanceof Error
+            ? error.message
+            : "";
 
         alert(
-          message === "member-not-found"
+          message ===
+            "member-not-found"
             ? "連携した会員情報が見つかりません。会員QRを読み直してください。"
             : "会員ポイントの自動付与に失敗したため、伝票終了を中止しました。通信状況を確認してもう一度お試しください。",
         );
@@ -6152,12 +6458,14 @@ function registerAdjustment(
             ),
             memberUid: ticket.memberUid,
             memberName: ticket.memberName,
+            memberLinks: ticket.memberLinks,
             pointEligibleAmount:
               calculateMemberPointEligibleAmount(ticket),
           }))}
           selectedTicketId={selectedTicketId}
           canApplyCoupon={isPosTerminal}
           onLinkMember={linkMemberToTicket}
+          onUnlinkMember={unlinkMemberFromTicket}
           onApplyCoupon={applyMemberCouponToTicket}
           onClose={() => setShowMemberManagement(false)}
         />

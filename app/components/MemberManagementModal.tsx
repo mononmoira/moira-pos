@@ -72,6 +72,12 @@ type Props = {
     ticketId: string,
     member: MemberTicketLink,
   ) => boolean;
+
+  onUnlinkMember: (
+    ticketId: string,
+    memberUid: string,
+  ) => boolean;
+
   onApplyCoupon: (
     ticketId: string,
     coupon: MemberCouponApplication,

@@ -4947,103 +4947,134 @@ function completePendingCashlessManually() {
     );
   }
 
-  function clockIn(
-    staffId: string,
-    businessTime: string,
-  ) {
-    if (!canEditAttendance("出勤時刻の登録・修正")) {
-      return;
-    }
-
-    setStaff((current) =>
-      current.map((person) => {
-        if (person.id !== staffId) {
-          return person;
-        }
-
-        const nextClockIn =
-          businessTimeToIso(
-            businessTime,
-            person.clockIn,
-          );
-
-        if (deviceMode === "management") {
-          recordAudit(
-            "修正",
-            "勤怠",
-            `${person.name} 出勤 ${businessTime}`,
-          );
-        }
-
-        return {
-          ...person,
-          clockIn: nextClockIn,
-          // 出勤時刻を修正する時、すでに退勤記録があれば残す。
-          // 新規出勤の場合だけ退勤を未登録へ戻す。
-          clockOut:
-            person.clockIn === null
-              ? null
-              : person.clockOut,
-        };
-      }),
-    );
+ function clockIn(
+  staffId: string,
+  businessTime: string,
+) {
+  if (!canEditAttendance("出勤時刻の登録・修正")) {
+    return;
   }
+
+  const todayBusinessDate =
+    businessSession?.businessDate ??
+    getBusinessDate(new Date());
+
+  setStaff((current) =>
+    current.map((person) => {
+      if (person.id !== staffId) {
+        return person;
+      }
+
+      const isTodayAttendance =
+        !!person.clockIn &&
+        getBusinessDate(
+          new Date(person.clockIn),
+        ) === todayBusinessDate;
+
+      const nextClockIn =
+        businessTimeToIso(
+          businessTime,
+          isTodayAttendance
+            ? person.clockIn
+            : null,
+        );
+
+      if (deviceMode === "management") {
+        recordAudit(
+          isTodayAttendance ? "修正" : "登録",
+          "勤怠",
+          `${person.name} 出勤 ${businessTime}`,
+        );
+      }
+
+      return {
+        ...person,
+        clockIn: nextClockIn,
+
+        // 今日の出勤修正なら退勤記録を残す。
+        // 新しい営業日の出勤なら退勤をリセットする。
+        clockOut: isTodayAttendance
+          ? person.clockOut
+          : null,
+      };
+    }),
+  );
+}
 
   function clockOut(
-    staffId: string,
-    businessTime: string,
-  ) {
-    if (!canEditAttendance("退勤時刻の登録・修正")) {
-      return;
-    }
-
-    setStaff((current) =>
-      current.map((person) => {
-        if (person.id !== staffId) {
-          return person;
-        }
-
-        if (!person.clockIn) {
-          alert(
-            `${person.name}さんは出勤時刻が未登録です。先に出勤時刻を保存してください。`,
-          );
-          return person;
-        }
-
-        const nextClockOut =
-          businessTimeToIso(
-            businessTime,
-            person.clockIn,
-          );
-
-        const clockInMs =
-          new Date(person.clockIn).getTime();
-
-        const clockOutMs =
-          new Date(nextClockOut).getTime();
-
-        if (clockOutMs < clockInMs) {
-          alert(
-            "退勤時刻が出勤時刻より前になっています。時刻を確認してください。",
-          );
-          return person;
-        }
-
-        if (deviceMode === "management") {
-          recordAudit(
-            "修正",
-            "勤怠",
-            `${person.name} 退勤 ${businessTime}`,
-          );
-        }
-
-        return {
-          ...person,
-          clockOut: nextClockOut,
-        };
-      }),
-    );
+  staffId: string,
+  businessTime: string,
+) {
+  if (!canEditAttendance("退勤時刻の登録・修正")) {
+    return;
   }
+
+  const todayBusinessDate =
+    businessSession?.businessDate ??
+    getBusinessDate(new Date());
+
+  setStaff((current) =>
+    current.map((person) => {
+      if (person.id !== staffId) {
+        return person;
+      }
+
+      if (!person.clockIn) {
+        alert(
+          `${person.name}さんは出勤時刻が未登録です。先に出勤時刻を保存してください。`,
+        );
+        return person;
+      }
+
+      const clockInBusinessDate =
+        getBusinessDate(
+          new Date(person.clockIn),
+        );
+
+      if (
+        clockInBusinessDate !==
+        todayBusinessDate
+      ) {
+        alert(
+          `${person.name}さんの本日の出勤時刻が未登録です。\n先に本日の出勤時刻を保存してください。`,
+        );
+        return person;
+      }
+
+      const nextClockOut =
+        businessTimeToIso(
+          businessTime,
+          person.clockIn,
+        );
+
+      const clockInMs =
+        new Date(person.clockIn).getTime();
+
+      const clockOutMs =
+        new Date(nextClockOut).getTime();
+
+      if (clockOutMs < clockInMs) {
+        alert(
+          "退勤時刻が出勤時刻より前になっています。時刻を確認してください。",
+        );
+        return person;
+      }
+
+      if (deviceMode === "management") {
+        recordAudit(
+          person.clockOut ? "修正" : "登録",
+          "勤怠",
+          `${person.name} 退勤 ${businessTime}`,
+        );
+      }
+
+      return {
+        ...person,
+        clockOut: nextClockOut,
+      };
+    }),
+  );
+}
 
   function updateStaff(
     staffId: string,

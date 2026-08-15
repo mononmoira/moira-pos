@@ -215,41 +215,27 @@ export default function PayrollModal({
   const [paymentNote, setPaymentNote] =
     useState("");
 
-  const todayAttendanceStaff = useMemo(
-    () =>
-      staff.filter((person) => {
-        if (!person.clockIn) return false;
-
-        return (
-          getBusinessDate(
-            new Date(person.clockIn),
-          ) === today
-        );
-      }),
-    [staff, today],
-  );
-
   const todayRows = useMemo(
-    () =>
-      calculatePayrollSnapshotRows({
-        businessDate: today,
-        staff: todayAttendanceStaff,
-        closedTickets,
-        activeTickets,
-        currentTime,
-        adjustments,
-        payments,
-      }),
-    [
-      today,
-      todayAttendanceStaff,
+  () =>
+    calculatePayrollSnapshotRows({
+      businessDate: today,
+      staff,
       closedTickets,
       activeTickets,
       currentTime,
       adjustments,
       payments,
-    ],
-  );
+    }),
+  [
+    today,
+    staff,
+    closedTickets,
+    activeTickets,
+    currentTime,
+    adjustments,
+    payments,
+  ],
+);
 
   useEffect(() => {
     const manualPayrollHistoryDocument = doc(

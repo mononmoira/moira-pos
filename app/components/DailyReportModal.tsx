@@ -440,8 +440,20 @@ tickets.forEach((ticket) => {
   }, [tickets, staff]);
 
   const staffRows = useMemo(
-    () =>
-      staff.map((person) => {
+   () =>
+  staff
+    .filter((person) => {
+      if (!person.clockIn) {
+        return false;
+      }
+
+      return (
+        getBusinessDate(
+          new Date(person.clockIn),
+        ) === today
+      );
+    })
+    .map((person) => {
         if (BACK_EXCLUDED_STAFF.includes(person.id)) {
   return {
     person,

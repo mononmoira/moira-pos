@@ -94,6 +94,8 @@ export default function StaffModal({
   const [clockInTime, setClockInTime] = useState("21:00");
   const [clockOutTime, setClockOutTime] = useState("25:00");
 
+const [showAllStaff, setShowAllStaff] = useState(false);
+
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] =
     useState<StaffRole>("体入");
@@ -195,24 +197,43 @@ export default function StaffModal({
           )}
         </div>
 
-        <label className="mt-6 block font-bold">
-          スタッフを選択
-        </label>
+       <button
+  type="button"
+  onClick={() =>
+    setShowAllStaff((current) => !current)
+  }
+  className="mt-6 w-full rounded-xl bg-slate-700 p-4 text-lg font-bold"
+>
+  {showAllStaff
+    ? "予定外スタッフ一覧を閉じる"
+    : "＋ 予定外スタッフを追加"}
+</button>
 
-        <select
-          size={Math.min(staff.length, 8)}
-          value={selectedId}
-          onChange={(event) =>
-            changeSelected(event.target.value)
-          }
-          className="mt-2 h-60 w-full rounded-xl bg-slate-800 p-3 text-xl"
+{showAllStaff && (
+  <div className="mt-3">
+    <label className="block font-bold">
+      スタッフを選択
+    </label>
+
+    <select
+      size={Math.min(staff.length, 8)}
+      value={selectedId}
+      onChange={(event) =>
+        changeSelected(event.target.value)
+      }
+      className="mt-2 h-60 w-full rounded-xl bg-slate-800 p-3 text-xl"
+    >
+      {staff.map((person) => (
+        <option
+          key={person.id}
+          value={person.id}
         >
-          {staff.map((person) => (
-            <option key={person.id} value={person.id}>
-              {person.name}｜{person.role}
-            </option>
-          ))}
-        </select>
+          {person.name}｜{person.role}
+        </option>
+      ))}
+    </select>
+  </div>
+)}
 
         {selected && (
           <div className="mt-5 rounded-2xl bg-slate-800 p-5">

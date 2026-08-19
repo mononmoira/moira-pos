@@ -10,9 +10,12 @@ import {
 
 import {
   collection,
+  doc,
   getFirestore,
   onSnapshot,
   query,
+  serverTimestamp,
+  setDoc,
   where,
   type Unsubscribe,
 } from "firebase/firestore";
@@ -62,6 +65,7 @@ export async function ensureShiftAuth() {
 export type ShiftSchedule = {
   id: string;
   staff: string;
+  staffId?: string;
   date: string;
   start: string;
   end: string;
@@ -69,6 +73,47 @@ export type ShiftSchedule = {
   published?: boolean;
   publicationStatus?: string;
 };
+
+export async function saveShiftAttendance(params: {
+  staffId: string;
+  staffName: string;
+  date: string;
+  clockIn?: string | null;
+  clockOut?: string | null;
+}) {
+  await ensureShiftAuth();
+
+  const {
+    staffId,
+    staffName,
+    date,
+    clockIn,
+    clockOut,
+  } = params;
+
+  const attendanceId =
+    `${date}_${staffId}`;
+
+  await setDoc(
+    doc(
+      shiftDb,
+      "shift_attendance",
+      attendanceId,
+    ),
+    {
+      staffId,
+      staffName,
+      date,
+      clockIn: clockIn ?? null,
+      clockOut: clockOut ?? null,
+      source: "moira-pos",
+      updatedAt: serverTimestamp(),
+    },
+    {
+      merge: true,
+    },
+  );
+}
 
 // 指定日の「公開済みシフト」をリアルタイム取得
 export async function subscribePublishedShifts(

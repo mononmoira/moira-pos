@@ -21,6 +21,7 @@ import {
 } from "firebase/firestore";
 
 import {
+  saveShiftAttendance,
   subscribePublishedShifts,
   type ShiftSchedule,
 } from "./lib/shiftFirebase";
@@ -5064,6 +5065,42 @@ function deleteStaff(
     businessSession?.businessDate ??
     getBusinessDate(new Date());
 
+    const targetPerson = staff.find(
+  (item) => item.id === staffId,
+);
+
+const scheduledShift =
+  targetPerson
+    ? publishedShifts.find(
+        (shift) =>
+          shift.staff ===
+            targetPerson.name &&
+          shift.date ===
+            todayBusinessDate,
+      )
+    : undefined;
+    const attendanceStaffId =
+  scheduledShift?.staffId ??
+  scheduledShift?.staff ??
+  targetPerson?.name ??
+  staffId;
+
+const isTodayAttendanceForSync =
+  !!targetPerson?.clockIn &&
+  getBusinessDate(
+    new Date(targetPerson.clockIn),
+  ) === todayBusinessDate;
+
+const nextClockInForSync =
+  targetPerson
+    ? businessTimeToIso(
+        businessTime,
+        isTodayAttendanceForSync
+          ? targetPerson.clockIn
+          : null,
+      )
+    : null;
+
   setStaff((current) =>
     current.map((person) => {
       if (person.id !== staffId) {
@@ -5104,6 +5141,27 @@ function deleteStaff(
       };
     }),
   );
+if (
+  targetPerson &&
+  nextClockInForSync
+) {
+  void saveShiftAttendance({
+    staffId: attendanceStaffId,
+    staffName: targetPerson.name,
+    date: todayBusinessDate,
+    clockIn: nextClockInForSync,
+    clockOut:
+      isTodayAttendanceForSync
+        ? targetPerson.clockOut
+        : null,
+  }).catch((error) => {
+    console.error(
+      "DAYS2への出勤実績保存に失敗しました。",
+      error,
+    );
+  });
+}
+
 }
 
   function clockOut(
@@ -5117,6 +5175,36 @@ function deleteStaff(
   const todayBusinessDate =
     businessSession?.businessDate ??
     getBusinessDate(new Date());
+
+    const targetPerson = staff.find(
+  (item) => item.id === staffId,
+);
+
+const scheduledShift =
+  targetPerson
+    ? publishedShifts.find(
+        (shift) =>
+          shift.staff === targetPerson.name &&
+          shift.date === todayBusinessDate,
+      )
+    : undefined;
+
+const attendanceStaffId =
+  scheduledShift?.staffId ??
+  scheduledShift?.staff ??
+  targetPerson?.name ??
+  staffId;
+
+const nextClockOutForSync =
+  targetPerson?.clockIn &&
+  getBusinessDate(
+    new Date(targetPerson.clockIn),
+  ) === todayBusinessDate
+    ? businessTimeToIso(
+        businessTime,
+        targetPerson.clockIn,
+      )
+    : null;
 
   setStaff((current) =>
     current.map((person) => {

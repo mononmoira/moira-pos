@@ -80,6 +80,7 @@ export async function saveShiftAttendance(params: {
   date: string;
   clockIn?: string | null;
   clockOut?: string | null;
+  testMode?: boolean;
 }) {
   await ensureShiftAuth();
 
@@ -89,17 +90,23 @@ export async function saveShiftAttendance(params: {
     date,
     clockIn,
     clockOut,
+    testMode,
   } = params;
+
+  const collectionName =
+  testMode
+    ? "shift_attendance_test"
+    : "shift_attendance";
 
   const attendanceId =
     `${date}_${staffId}`;
 
   await setDoc(
     doc(
-      shiftDb,
-      "shift_attendance",
-      attendanceId,
-    ),
+  shiftDb,
+  collectionName,
+  attendanceId,
+),
     {
       staffId,
       staffName,

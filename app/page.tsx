@@ -5154,6 +5154,7 @@ if (
       isTodayAttendanceForSync
         ? targetPerson.clockOut
         : null,
+       testMode: isTestMode, 
   }).catch((error) => {
     console.error(
       "DAYS2への出勤実績保存に失敗しました。",
@@ -5267,6 +5268,25 @@ const nextClockOutForSync =
       };
     }),
   );
+
+ if (
+  targetPerson?.clockIn &&
+  nextClockOutForSync
+) {
+  void saveShiftAttendance({
+    staffId: attendanceStaffId,
+    staffName: targetPerson.name,
+    date: todayBusinessDate,
+    clockIn: targetPerson.clockIn,
+    clockOut: nextClockOutForSync,
+    testMode: isTestMode,
+  }).catch((error) => {
+    console.error(
+      "DAYS2への退勤実績保存に失敗しました。",
+      error,
+    );
+  });
+} 
 }
 
   function updateStaff(

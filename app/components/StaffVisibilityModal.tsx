@@ -10,6 +10,9 @@ type Props = {
     staffId: string,
     visible: boolean,
   ) => void;
+  onDeleteStaff: (
+  staffId: string,
+) => void;
   onClose: () => void;
 };
 
@@ -17,6 +20,7 @@ export default function StaffVisibilityModal({
   staff,
   hiddenStaffIds,
   onSetVisible,
+  onDeleteStaff,
   onClose,
 }: Props) {
   const [showHiddenOnly, setShowHiddenOnly] =
@@ -171,19 +175,33 @@ export default function StaffVisibilityModal({
                   </div>
 
                   {hidden ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onSetVisible(
-                          person.id,
-                          true,
-                        )
-                      }
-                      className="min-h-11 rounded-xl bg-blue-700 px-5 py-2 font-black"
-                    >
-                      選択に戻す
-                    </button>
-                  ) : (
+  <div className="flex flex-wrap gap-2">
+    <button
+      type="button"
+      onClick={() =>
+        onSetVisible(
+          person.id,
+          true,
+        )
+      }
+      className="min-h-11 rounded-xl bg-blue-700 px-5 py-2 font-black"
+    >
+      選択に戻す
+    </button>
+
+    <button
+      type="button"
+      onClick={() =>
+        onDeleteStaff(
+          person.id,
+        )
+      }
+      className="min-h-11 rounded-xl bg-red-700 px-5 py-2 font-black"
+    >
+      スタッフ登録を削除
+    </button>
+  </div>
+) : (
                     <button
                       type="button"
                       disabled={currentlyWorking}

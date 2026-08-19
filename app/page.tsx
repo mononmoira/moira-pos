@@ -5005,6 +5005,56 @@ function completePendingCashlessManually() {
     );
   }
 
+function deleteStaff(
+  staffId: string,
+) {
+  const person = staff.find(
+    (item) => item.id === staffId,
+  );
+
+  if (!person) {
+    return;
+  }
+
+  if (
+    person.clockIn &&
+    !person.clockOut
+  ) {
+    alert(
+      `${person.name}さんは現在出勤中です。退勤登録後に削除してください。`,
+    );
+    return;
+  }
+
+  const confirmed =
+    window.confirm(
+      `${person.name}さんをPOSのスタッフ登録から削除しますか？\n\n過去の売上・給与・営業履歴は削除されません。`,
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  setStaff((current) =>
+    current.filter(
+      (item) =>
+        item.id !== staffId,
+    ),
+  );
+
+  setHiddenStaffIds((current) =>
+    current.filter(
+      (id) => id !== staffId,
+    ),
+  );
+
+  recordAudit(
+    "削除",
+    "スタッフ",
+    `${person.name}をスタッフ登録から削除`,
+  );
+}
+
  function clockIn(
   staffId: string,
   businessTime: string,
@@ -6672,13 +6722,14 @@ function completePendingCashlessManually() {
 
       {showStaffVisibility && (
         <StaffVisibilityModal
-          staff={staff}
-          hiddenStaffIds={hiddenStaffIds}
-          onSetVisible={setStaffSelectionVisibility}
-          onClose={() => {
-            setShowStaffVisibility(false);
-          }}
-        />
+  staff={staff}
+  hiddenStaffIds={hiddenStaffIds}
+  onSetVisible={setStaffSelectionVisibility}
+  onDeleteStaff={deleteStaff}
+  onClose={() => {
+    setShowStaffVisibility(false);
+  }}
+/>
       )}
 
       {showStaff && (

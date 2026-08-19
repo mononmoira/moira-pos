@@ -4921,7 +4921,7 @@ function completePendingCashlessManually() {
 
     const baseDate = new Date(anchor);
 
-    if (anchor.getHours() < 12) {
+    if (anchor.getHours() < 8) {
       baseDate.setDate(baseDate.getDate() - 1);
     }
 

@@ -132,6 +132,70 @@ const [showAllStaff, setShowAllStaff] = useState(false);
   );
 }
 
+function getBusinessDateKey(
+  value: string | null,
+) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  // Moiraは朝8時まで前営業日扱い
+  if (date.getHours() < 8) {
+    date.setDate(
+      date.getDate() - 1,
+    );
+  }
+
+  return [
+    date.getFullYear(),
+    String(
+      date.getMonth() + 1,
+    ).padStart(2, "0"),
+    String(
+      date.getDate(),
+    ).padStart(2, "0"),
+  ].join("-");
+}
+
+function getShiftAttendanceStatus(
+  shift: ShiftSchedule,
+) {
+  const person = staff.find(
+    (item) =>
+      item.name === shift.staff,
+  );
+
+  if (!person?.clockIn) {
+    return "未出勤";
+  }
+
+  const clockInBusinessDate =
+    getBusinessDateKey(
+      person.clockIn,
+    );
+
+  // 前日の勤怠が残っていても
+  // 今日のシフトには反映しない
+  if (
+    clockInBusinessDate !==
+    shift.date
+  ) {
+    return "未出勤";
+  }
+
+  if (!person.clockOut) {
+    return "出勤中";
+  }
+
+  return "退勤済み";
+}
+
  return ( 
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 p-4">
       <div className="mx-auto my-4 w-full max-w-3xl rounded-3xl bg-slate-900 p-6 text-white">
@@ -159,36 +223,55 @@ const [showAllStaff, setShowAllStaff] = useState(false);
 
           {publishedShifts.length > 0 ? (
             <div className="mt-4 space-y-2">
-             {publishedShifts.map((shift) => (
-  <button
-    key={shift.id}
-    type="button"
-    onClick={() =>
-      selectScheduledStaff(shift)
-    }
-    className="flex w-full items-center justify-between rounded-xl bg-slate-700 p-4 text-left hover:bg-slate-600"
-  >
-    <div>
-      <div className="text-lg font-bold">
-        {shift.staff}
+             {publishedShifts.map((shift) => {
+  const status =
+    getShiftAttendanceStatus(shift);
+
+  return (
+    <button
+      key={shift.id}
+      type="button"
+      onClick={() =>
+        selectScheduledStaff(shift)
+      }
+      className="flex w-full items-center justify-between rounded-xl bg-slate-700 p-4 text-left hover:bg-slate-600"
+    >
+      <div>
+        <div className="flex items-center gap-2">
+          <div className="text-lg font-bold">
+            {shift.staff}
+          </div>
+
+          <span
+            className={`rounded-full px-2 py-1 text-xs font-bold ${
+              status === "出勤中"
+                ? "bg-emerald-700"
+                : status === "退勤済み"
+                  ? "bg-blue-700"
+                  : "bg-slate-500"
+            }`}
+          >
+            {status}
+          </span>
+        </div>
+
+        {shift.memo && (
+          <div className="mt-1 text-sm text-slate-300">
+            {shift.memo}
+          </div>
+        )}
       </div>
 
-      {shift.memo && (
-        <div className="mt-1 text-sm text-slate-300">
-          {shift.memo}
-        </div>
-      )}
-    </div>
-
-    <div className="text-right font-bold">
-      {shift.start}
-      <span className="mx-1 text-slate-400">
-        〜
-      </span>
-      {shift.end || "LAST"}
-    </div>
-  </button>
-))} 
+      <div className="text-right font-bold">
+        {shift.start}
+        <span className="mx-1 text-slate-400">
+          〜
+        </span>
+        {shift.end || "LAST"}
+      </div>
+    </button>
+  );
+})}
             </div>
           ) : (
             <p className="mt-4 text-slate-400">

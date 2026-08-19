@@ -195,6 +195,43 @@ function getShiftAttendanceStatus(
 
   return "退勤済み";
 }
+function getActualClockInTime(
+  shift: ShiftSchedule,
+) {
+  const person = staff.find(
+    (item) =>
+      item.name === shift.staff,
+  );
+
+  if (!person?.clockIn) {
+    return "";
+  }
+
+  if (
+    getBusinessDateKey(
+      person.clockIn,
+    ) !== shift.date
+  ) {
+    return "";
+  }
+
+  const date = new Date(
+    person.clockIn,
+  );
+
+  let hour = date.getHours();
+
+  if (hour < 8) {
+    hour += 24;
+  }
+
+  return `${String(hour).padStart(
+    2,
+    "0",
+  )}:${String(
+    date.getMinutes(),
+  ).padStart(2, "0")}`;
+}
 
  return ( 
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 p-4">
@@ -226,6 +263,9 @@ function getShiftAttendanceStatus(
              {publishedShifts.map((shift) => {
   const status =
     getShiftAttendanceStatus(shift);
+
+  const actualClockIn =
+    getActualClockInTime(shift);
 
   return (
     <button
@@ -262,13 +302,21 @@ function getShiftAttendanceStatus(
         )}
       </div>
 
-      <div className="text-right font-bold">
-        {shift.start}
-        <span className="mx-1 text-slate-400">
-          〜
-        </span>
-        {shift.end || "LAST"}
-      </div>
+      <div className="text-right">
+  <div className="font-bold">
+    予定 {shift.start}
+    <span className="mx-1 text-slate-400">
+      〜
+    </span>
+    {shift.end || "LAST"}
+  </div>
+
+  {actualClockIn && (
+    <div className="mt-1 text-sm font-bold text-emerald-300">
+      実際 {actualClockIn}
+    </div>
+  )}
+</div>
     </button>
   );
 })}

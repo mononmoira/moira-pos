@@ -232,6 +232,46 @@ function getActualClockInTime(
     date.getMinutes(),
   ).padStart(2, "0")}`;
 }
+function getActualClockOutTime(
+  shift: ShiftSchedule,
+) {
+  const person = staff.find(
+    (item) =>
+      item.name === shift.staff,
+  );
+
+  if (
+    !person?.clockIn ||
+    !person.clockOut
+  ) {
+    return "";
+  }
+
+  if (
+    getBusinessDateKey(
+      person.clockIn,
+    ) !== shift.date
+  ) {
+    return "";
+  }
+
+  const date = new Date(
+    person.clockOut,
+  );
+
+  let hour = date.getHours();
+
+  if (hour < 8) {
+    hour += 24;
+  }
+
+  return `${String(hour).padStart(
+    2,
+    "0",
+  )}:${String(
+    date.getMinutes(),
+  ).padStart(2, "0")}`;
+}
 
  return ( 
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/85 p-4">
@@ -266,6 +306,9 @@ function getActualClockInTime(
 
   const actualClockIn =
     getActualClockInTime(shift);
+
+  const actualClockOut =
+  getActualClockOutTime(shift);  
 
   return (
     <button
@@ -312,10 +355,18 @@ function getActualClockInTime(
   </div>
 
   {actualClockIn && (
-    <div className="mt-1 text-sm font-bold text-emerald-300">
-      実際 {actualClockIn}
-    </div>
-  )}
+  <div className="mt-1 text-sm font-bold text-emerald-300">
+    実際 {actualClockIn}
+    {actualClockOut && (
+      <>
+        <span className="mx-1">
+          〜
+        </span>
+        {actualClockOut}
+      </>
+    )}
+  </div>
+)}
 </div>
     </button>
   );

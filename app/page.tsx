@@ -722,6 +722,7 @@ export default function Home() {
   const [businessSession, setBusinessSession] =
     useState<BusinessSession | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const shiftBusinessDate = getBusinessDate( new Date(currentTime),);
   const [hasMounted, setHasMounted] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [canPersist, setCanPersist] = useState(false);
@@ -1181,9 +1182,6 @@ return mergedStaff;
 
   // ===== Moira-DAYS2 公開シフト連携 =====
 useEffect(() => {
-  const businessDate =
-    getBusinessDate(new Date());
-
   let unsubscribe:
     | (() => void)
     | null = null;
@@ -1192,10 +1190,9 @@ useEffect(() => {
 
   async function startShiftSync() {
     try {
-      const stop =
-        await subscribePublishedShifts(
-          businessDate,
-          (shifts) => {
+      const stop = await subscribePublishedShifts(
+  shiftBusinessDate,
+  (shifts) => {
             if (!cancelled) {
               setPublishedShifts(shifts);
             }
@@ -1226,7 +1223,7 @@ useEffect(() => {
     cancelled = true;
     unsubscribe?.();
   };
-}, []);
+}, [shiftBusinessDate]);
 // ===== シフト連携ここまで =====
 
  useEffect(() => {

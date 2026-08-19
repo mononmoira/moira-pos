@@ -22,6 +22,7 @@ import {
 
 import {
   saveShiftAttendance,
+  saveShiftPayroll,
   subscribePublishedShifts,
   type ShiftSchedule,
 } from "./lib/shiftFirebase";
@@ -4820,7 +4821,7 @@ function completePendingCashlessManually() {
     );
   }
 
-  function closeBusinessDay(closingAmount: number) {
+async function closeBusinessDay(closingAmount: number) {
 
     if (!requireIpadPos("営業終了")) return;
 
@@ -4850,17 +4851,22 @@ function completePendingCashlessManually() {
     const drawer = getBusinessCashFigures(businessSession);
     const difference = closingAmount - drawer.expected;
 
+const finalizedPayrollRows =
+  calculatePayrollSnapshotRows({
+    businessDate,
+    staff,
+    closedTickets,
+    activeTickets: [],
+    currentTime: Date.now(),
+    adjustments:
+      payrollAdjustments,
+    payments:
+      payrollPayments,
+  });
+
     const report: BusinessReport = {
       ...baseReport,
-      payrollRows: calculatePayrollSnapshotRows({
-        businessDate,
-        staff,
-        closedTickets,
-        activeTickets: [],
-        currentTime: Date.now(),
-        adjustments: payrollAdjustments,
-        payments: payrollPayments,
-      }),
+      payrollRows: finalizedPayrollRows,
       drawerOpeningAmount: businessSession.openingAmount,
       drawerCashSales: drawer.cashSales,
       drawerReceivableCollections: drawer.receivableCollections,
@@ -4889,6 +4895,56 @@ function completePendingCashlessManually() {
     );
 
     if (!confirmed) return;
+
+    if (!isTestMode) {
+  try {
+    await Promise.all(
+      finalizedPayrollRows.map(async (row) => {
+        const scheduledShift =
+          publishedShifts.find(
+            (shift) =>
+              shift.date === businessDate &&
+              shift.staff === row.name,
+          );
+
+        const shiftStaffId =
+          scheduledShift?.staffId ??
+          scheduledShift?.staff ??
+          row.name;
+
+        await saveShiftPayroll({
+          staffId: shiftStaffId,
+          staffName: row.name,
+          date: businessDate,
+          role: row.role,
+          paymentCycle: row.paymentCycle,
+          hourlyWage: row.hourlyWage,
+          minutes: row.minutes,
+          hourly: row.hourly,
+          drink: row.drink,
+          champagne: row.champagne,
+          event: row.event,
+          reservation: row.reservation,
+          transport: row.transport,
+          parking: row.parking,
+          gross: row.gross,
+          paid: row.paid,
+        });
+      }),
+    );
+  } catch (error) {
+    console.error(
+      "DAYS2への給与明細保存に失敗しました。",
+      error,
+    );
+
+    alert(
+      "DAYS2への給与明細保存に失敗しました。\n営業終了はまだ確定していません。\n通信を確認して、もう一度営業終了してください。",
+    );
+
+    return;
+  }
+}
 
     setBusinessReports((current) => [...current, report]);
     recordAudit(

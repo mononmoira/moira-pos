@@ -186,3 +186,43 @@ export async function subscribePublishedShifts(
     },
   );
 }
+export async function saveShiftPayroll(params: {
+  staffId: string;
+  staffName: string;
+  date: string;
+  role: string;
+  paymentCycle: string;
+  hourlyWage: number;
+  minutes: number;
+  hourly: number;
+  drink: number;
+  champagne: number;
+  event: number;
+  reservation: number;
+  transport: number;
+  parking: number;
+  gross: number;
+  paid: number;
+}) {
+  await ensureShiftAuth();
+
+  const payrollId =
+    `${params.date}_${params.staffId}`;
+
+  await setDoc(
+    doc(
+      shiftDb,
+      "shift_payroll",
+      payrollId,
+    ),
+    {
+      ...params,
+      source: "moira-pos",
+      finalized: true,
+      updatedAt: serverTimestamp(),
+    },
+    {
+      merge: true,
+    },
+  );
+}

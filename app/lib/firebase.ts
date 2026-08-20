@@ -1,4 +1,7 @@
-import { getApps, initializeApp } from "firebase/app";
+import {
+  getApps,
+  initializeApp,
+} from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -10,9 +13,15 @@ const firebaseConfig = {
   appId: "1:809757883169:web:84e28ded6d860fd3819c60",
 };
 
+const appName = "moira-pos-main";
+
 const app =
-  getApps().length > 0
-    ? getApps()[0]
-    : initializeApp(firebaseConfig);
+  getApps().find(
+    (item) => item.name === appName,
+  ) ??
+  initializeApp(
+    firebaseConfig,
+    appName,
+  );
 
 export const db = getFirestore(app);

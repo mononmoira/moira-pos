@@ -1483,12 +1483,15 @@ setTimeout(() => {
   syncingRef.current = false;
 }, 500);
     },
-    (error) => {
-      console.error(
-        "Firestoreからの受信に失敗しました。",
-        error,
-      );
-    },
+   (error) => {
+  console.error(
+    "Firestoreからの受信に失敗しました。",
+    error,
+  );
+
+  syncingRef.current = false;
+  setCloudSyncReady(true);
+},
   );
 
   return unsubscribe;

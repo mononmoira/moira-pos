@@ -5270,6 +5270,32 @@ const nextClockOutForSync =
       )
     : null;
 
+    if (
+  targetPerson?.clockIn &&
+  nextClockOutForSync
+) {
+  const clockInMsForSync =
+    new Date(
+      targetPerson.clockIn,
+    ).getTime();
+
+  const clockOutMsForSync =
+    new Date(
+      nextClockOutForSync,
+    ).getTime();
+
+  if (
+    clockOutMsForSync <
+    clockInMsForSync
+  ) {
+    alert(
+      "退勤時刻が出勤時刻より前になっています。時刻を確認してください。",
+    );
+
+    return;
+  }
+}
+
   setStaff((current) =>
     current.map((person) => {
       if (person.id !== staffId) {

@@ -18,9 +18,13 @@ export type PayrollSnapshotRow = {
   minutes: number;
   hourly: number;
   drink: number;
+  drinkCount: number;
   champagne: number;
+  champagneCount: number;
   event: number;
+  eventCount: number;
   reservation: number;
+  reservationCount: number;
   transport: number;
   parking: number;
   gross: number;
@@ -195,8 +199,13 @@ export function calculatePayrollSnapshotRows({
       );
 
       let drink = 0;
-      let champagne = 0;
-      let event = 0;
+let drinkCount = 0;
+
+let champagne = 0;
+let champagneCount = 0;
+
+let event = 0;
+let eventCount = 0;
 
       for (const ticket of tickets) {
         const companionSeat = ticket.orders.some(
@@ -218,6 +227,8 @@ export function calculatePayrollSnapshotRows({
             drink +=
               drinkTable[order.productId] *
               order.quantity;
+
+              drinkCount += order.quantity;
           }
 
           const totalChampagneBack =
@@ -240,10 +251,14 @@ export function calculatePayrollSnapshotRows({
               ) *
               100 *
               order.quantity;
+
+              champagneCount += order.quantity;
           }
 
           const cups =
             order.eventCups?.[person.id] ?? 0;
+
+            eventCount += cups;
 
           event +=
             cups *
@@ -263,6 +278,24 @@ export function calculatePayrollSnapshotRows({
           (item) =>
             item.staffId === person.id,
         );
+
+const reservationCount =
+  tickets.reduce((total, ticket) => {
+    const quantity = (
+      ticket.reservationEntries ?? []
+    )
+      .filter(
+        (entry) =>
+          entry.staffId === person.id,
+      )
+      .reduce(
+        (subtotal, entry) =>
+          subtotal + entry.quantity,
+        0,
+      );
+
+    return total + quantity;
+  }, 0);
 
       const reservationFromTickets =
         tickets.reduce((total, ticket) => {
@@ -358,9 +391,13 @@ export function calculatePayrollSnapshotRows({
         minutes,
         hourly,
         drink,
-        champagne,
-        event,
-        reservation,
+drinkCount,
+champagne,
+champagneCount,
+event,
+eventCount,
+reservation,
+reservationCount,
         transport,
         parking,
         gross,

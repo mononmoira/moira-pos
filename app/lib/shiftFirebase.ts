@@ -196,9 +196,13 @@ export async function saveShiftPayroll(params: {
   minutes: number;
   hourly: number;
   drink: number;
-  champagne: number;
-  event: number;
-  reservation: number;
+drinkCount: number;
+champagne: number;
+champagneCount: number;
+event: number;
+eventCount: number;
+reservation: number;
+reservationCount: number;
   transport: number;
   parking: number;
   gross: number;

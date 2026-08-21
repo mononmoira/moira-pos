@@ -287,9 +287,16 @@ export default function PayrollModal({
         minutes: 0,
         hourly: 0,
         drink: 0,
-        champagne: 0,
-        event: 0,
-        reservation: 0,
+drinkCount: 0,
+
+champagne: 0,
+champagneCount: 0,
+
+event: 0,
+eventCount: 0,
+
+reservation: 0,
+reservationCount: 0,
         transport: 0,
         parking: 0,
         manual: entry.amount,
